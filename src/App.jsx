@@ -2,8 +2,8 @@ import { useState } from "react";
 import "./App.css";
 import { Route, Routes } from "react-router-dom";
 
-import UserLogin from "./pages/userLogin";
-import UserSignup from "./pages/userSignup";
+import UserLogin from "./pages/UserLogin";
+import UserSignup from "./pages/UserSignup";
 import CaptainLogin from "./pages/CaptainLogin";
 import CaptainSignup from "./pages/CaptainSignup";
 import Start from "./pages/Start";
