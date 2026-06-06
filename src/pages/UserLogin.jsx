@@ -1,7 +1,7 @@
 import React from 'react'
 import logo from "../assets/logo.png";
 import { Link, useNavigate } from 'react-router-dom';
-import UserSignup from './userSignup';
+import UserSignup from './UserSignup';
 import { useState } from 'react';
 
 import { useContext } from 'react';
