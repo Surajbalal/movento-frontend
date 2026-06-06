@@ -3,7 +3,7 @@ import logo from "../assets/logo.png";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import "remixicon/fonts/remixicon.css";
-import LocationSearchPanel from "../Components/locationSearchPanel";
+import LocationSearchPanel from "../Components/LocationSearchPanel";
 import VehicalPanel from "../Components/VehicalPanel";
 import Searching from "../Components/Searching";
 import LookingForDriver from "../Components/LookingForDriver";
