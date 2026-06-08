@@ -7,12 +7,10 @@ import LocationSearchPanel from "../Components/LocationSearchPanel";
 import VehicalPanel from "../Components/VehicalPanel";
 import Searching from "../Components/Searching";
 import LookingForDriver from "../Components/LookingForDriver";
-import WaitingForDriver from "../Components/WaitingForDriver";
 import { UserDataContext } from "../Context/UserContext";
 import { SocketContext } from "../Context/SocketContext";
 import { AuthContext } from "../Context/AuthContext";
 import { Link, useNavigate } from "react-router-dom";
-import LiveTracking from "../Components/LiveTracking";
 import axiosInstance from "../api/axiosInstance";
 
 function Home() {
@@ -52,6 +50,44 @@ function Home() {
   // State for ongoing ride that user can manually resume
   const [activeOngoingRide, setActiveOngoingRide] = useState(null);
 
+  // State for passenger's recent rides
+  const [recentRides, setRecentRides] = useState([]);
+
+  const token = localStorage.getItem("token");
+
+  // Fetch recent rides when token changes
+  useEffect(() => {
+    if (!token) {
+      setRecentRides([]);
+      return;
+    }
+    const fetchRecentRides = async () => {
+      try {
+        const response = await axiosInstance.get("/rides/my-rides");
+        if (response.status === 200) {
+          const allRides = response.data.rides || response.data || [];
+          setRecentRides(allRides.slice(0, 3));
+        }
+      } catch (error) {
+        console.error("Failed to fetch recent rides:", error);
+      }
+    };
+    fetchRecentRides();
+  }, [token]);
+
+  const handleRecentRideClick = (ride) => {
+    if (ride.pickup?.address) {
+      setpickup(ride.pickup.address);
+    } else if (typeof ride.pickup === "string") {
+      setpickup(ride.pickup);
+    }
+    if (ride.destination?.address) {
+      setDestination(ride.destination.address);
+    } else if (typeof ride.destination === "string") {
+      setDestination(ride.destination);
+    }
+  };
+
   // Open AuthModal helpers for navbar
   const openAuthModal = (tab = "login") => {
     setAuthModalRole("user");
@@ -59,11 +95,9 @@ function Home() {
     setShowAuthModal(true);
   };
 
-  const token = localStorage.getItem("token");
-
   const [isVehicalPanelOpen, setIsVehicalPanelOpen] = useState(false);
 
-  // Fetch active ride only if authenticated — NO forced redirect
+  // Fetch active ride only if authenticated — Redirect to Riding if accepted or ongoing
   useEffect(() => {
     if (!token) return; // Skip for unauthenticated users
 
@@ -72,16 +106,16 @@ function Home() {
         const response = await axiosInstance.get("/rides/get-ride");
         if (!response.data?._id) return;
 
-        if (response.data.status === "ongoing") {
-          // Store the ongoing ride so user can manually resume
-          setActiveOngoingRide(response.data);
-          setRideData(response.data);
+        if (response.data.status === "accepted" || response.data.status === "ongoing") {
+          navigate("/riding", { state: { ride: response.data } });
           return;
         }
-        if (response.data && response.data._id) {
+        if (response.data.status === "pending") {
           setRideData(response.data);
-          setIsDriverWaitingOpen(true);
-          setIsRideAccepted(true);
+          setpickup(response.data.pickup?.address || response.data.pickup);
+          setDestination(response.data.destination?.address || response.data.destination);
+          setVehicleType(response.data.vehicleType);
+          setIsVehicleSearchOpen(true);
         }
       } catch (error) {
         console.log("No active ride found");
@@ -137,33 +171,21 @@ function Home() {
     const handleRideConfirm = (ride) => {
       console.log(" ride-confirm received", ride);
 
-      // set ride data
       setRideData(ride);
 
-      // close all other panels
       setIsVehicalPanelOpen(false);
       setIsSearchingPanelOpen(false);
       setIsVehicleSearchOpen(false);
 
-      // open waiting panel
-      setIsRideAccepted(true);
-      setIsDriverWaitingOpen(true);
-    };
-
-    const handleRideStarted = (ride) => {
-      console.log(" ride-started received", ride);
-
-      setIsDriverWaitingOpen(false);
-      setIsRideAccepted(false);
-
+      // Redirect immediately to Riding page
       navigate("/riding", { state: { ride } });
     };
 
     const handleRideCancelled = (data) => {
       console.log("ride-cancelled received", data);
       setRideData({});
-      setIsDriverWaitingOpen(false);
-      setIsRideAccepted(false);
+      setIsVehicleSearchOpen(false);
+      setIsVehicalPanelOpen(false);
       setIsPanelOpen(false);
       alert(`Ride cancelled because of: ${data.reason}` || `Ride Cancelled`);
     };
@@ -171,19 +193,17 @@ function Home() {
     socket.on("ride-ended", (data) => {
       console.log(" ride-ended received", data);
       setRideData({});
-      setIsDriverWaitingOpen(false);
-      setIsRideAccepted(false);
+      setIsVehicleSearchOpen(false);
+      setIsVehicalPanelOpen(false);
       setIsPanelOpen(false);
       alert(data.message);
     });
     socket.on("ride-confirm", handleRideConfirm);
-    socket.on("ride-started", handleRideStarted);
     socket.on("ride-cancelled", handleRideCancelled);
 
     // cleanup (VERY IMPORTANT)
     return () => {
       socket.off("ride-confirm", handleRideConfirm);
-      socket.off("ride-started", handleRideStarted);
       socket.off("ride-cancelled", handleRideCancelled);
     };
   }, [socket, navigate, token]);
@@ -341,8 +361,22 @@ function Home() {
     return () => clearTimeout(timeout);
   }, [pickup, destination, activeField, isPanelOpen]);
 
+  // Close suggestions panel on click outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (panelRef.current && !panelRef.current.contains(event.target)) {
+        setIsPanelOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [panelRef]);
+
   // Determine if user is authenticated for UI rendering
   const isAuthenticated = isUserAuthenticated();
+  const showMap = !!fare.car || (rideData && !!rideData._id);
 
   return (
     <div className="h-screen bg-white flex flex-col relative overflow-hidden font-sans">
@@ -561,141 +595,399 @@ function Home() {
         </div>
       )}
 
-      {/* Main Container */}
-      <div className="flex-1 flex flex-col md:flex-row w-full max-w-[1920px] mx-auto z-10 pointer-events-none md:pointer-events-auto h-full pt-[72px] md:pt-0">
-        {/* Map Background for Mobile; Handled by Grid on Desktop */}
-        <div className="absolute inset-0 z-0 md:hidden bg-gray-100">
-          <LiveTracking rideData={rideData} isCaptain={false} pickup={pickup} destination={destination} />
-        </div>
-
-        {/* Left Side: Search Panel */}
-        <div className="w-full md:w-[450px] lg:w-[500px] h-full flex flex-col justify-end md:justify-start pointer-events-none md:pt-16 md:pl-16 z-20">
-          <div className="bg-white rounded-t-[2.5rem] md:rounded-none w-full p-6 md:p-0 pointer-events-auto transition-all shadow-[0_-12px_40px_rgba(0,0,0,0.12)] md:shadow-none pb-8 md:pb-0 relative border-t border-gray-100 md:border-t-0">
-            {/* Drag Handle for Mobile Bottom Sheet */}
-            <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-5 md:hidden"></div>
-            <button
-              ref={panelCloseRef}
-              onClick={() => setIsPanelOpen(false)}
-              className="md:hidden absolute top-4 right-4 text-gray-500 hover:text-gray-900 focus:outline-none"
-            >
-              <i className="ri-arrow-down-wide-line text-2xl"></i>
-            </button>
-
-            {/* Desktop Headline */}
-            <h1 className="hidden md:block text-5xl lg:text-[54px] font-bold tracking-tight mb-8 text-black leading-[1.1]">
-              Request a ride for now or later
-            </h1>
-
-            {/* Mobile Headline */}
-            <h4 className="md:hidden text-2xl font-bold mb-5 text-gray-900">
-              Where to?
-            </h4>
-
-            <form onSubmit={submitHandler} className="w-full relative">
-              <div className="flex flex-col gap-3 w-full relative">
-                {/* Connecting Line (Only spans between the two inputs) */}
-                <div className="absolute left-[20px] md:left-[22px] top-6 bottom-6 w-[2px] bg-black z-20 hidden md:block"></div>
-                <div className="md:hidden absolute left-[20px] top-6 bottom-6 w-0.5 bg-gray-300 z-10"></div>
-
-                {/* Pickup Field */}
-                <div className="relative w-full group">
-                  <div className="absolute left-4 md:left-4 top-1/2 transform -translate-y-1/2 z-30">
-                    <div className="w-2 md:w-3 h-2 md:h-3 bg-black rounded-full shadow-sm"></div>
-                  </div>
-                  <input
-                    value={pickup}
-                    onClick={() => {
-                      setIsPanelOpen(true);
-                      setActiveField("pickup");
-                      setIsLocationSelected(false);
-                    }}
-                    onChange={(e) => setpickup(e.target.value)}
-                    className="w-full pl-10 md:pl-12 pr-4 py-3 md:py-4 bg-gray-100 rounded-lg md:rounded-xl text-base placeholder-black focus:bg-gray-200 focus:outline-none transition-all duration-200"
-                    type="text"
-                    placeholder="Pickup location"
-                    autoComplete="off"
-                  />
+      {!showMap ? (
+        /* Structure B: Premium Landing Layout */
+        <div className="flex-1 overflow-y-auto bg-gray-50 pt-[72px] md:pt-0 w-full relative pointer-events-auto">
+          <div className="max-w-6xl mx-auto px-4 py-8 md:py-16 flex flex-col gap-12">
+            
+            {/* Section 1: Hero & Search Form */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-center bg-white rounded-3xl p-6 md:p-10 shadow-sm border border-gray-100">
+              
+              {/* Left Column: Hero Text & Inputs */}
+              <div className="md:col-span-7 flex flex-col gap-6 relative">
+                <div>
+                  <span className="bg-black text-white text-xs font-bold px-3 py-1.5 rounded-full uppercase tracking-wider">
+                    Ride with Movento
+                  </span>
+                  <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-gray-900 tracking-tight leading-none mt-4">
+                    Go anywhere with <span className="text-transparent bg-clip-text bg-gradient-to-r from-gray-900 to-gray-500">Movento</span>
+                  </h1>
+                  <p className="text-gray-500 text-sm md:text-base mt-2 max-w-md">
+                    Request a ride now or schedule for later. Safe, affordable outstation and city travels.
+                  </p>
                 </div>
 
-                {/* Destination Field */}
-                <div className="relative w-full group">
-                  <div className="absolute left-4 md:left-4 top-1/2 transform -translate-y-1/2 z-30">
-                    <div className="w-2 md:w-3 h-2 md:h-3 bg-black rounded-sm shadow-sm"></div>
-                  </div>
-                  <input
-                    onClick={() => {
-                      setIsPanelOpen(true);
-                      setActiveField("destination");
-                      setIsLocationSelected(false);
-                    }}
-                    value={destination}
-                    onChange={(e) => setDestination(e.target.value)}
-                    className="w-full pl-10 md:pl-12 pr-4 py-3 md:py-4 bg-gray-100 rounded-lg md:rounded-xl text-base placeholder-black focus:bg-gray-200 focus:outline-none transition-all duration-200"
-                    type="text"
-                    placeholder="Dropoff location"
-                    autoComplete="off"
-                  />
-                </div>
+                {/* Form */}
+                <form onSubmit={submitHandler} className="w-full relative flex flex-col gap-4">
+                  <div className="flex flex-col gap-3 relative">
+                    {/* Connecting Line */}
+                    <div className="absolute left-[20px] top-6 bottom-6 w-[2px] bg-black z-20 hidden md:block"></div>
+                    <div className="absolute left-[18px] top-6 bottom-6 w-0.5 bg-gray-300 z-10 md:hidden"></div>
 
-                {/* Search / Choose Vehicle Button (Responsive) */}
-                {!fare.car ? (
+                    {/* Pickup Field */}
+                    <div className="relative w-full group">
+                      <div className="absolute left-4 top-1/2 -translate-y-1/2 z-30">
+                        <div className="w-2.5 h-2.5 bg-black rounded-full shadow-sm"></div>
+                      </div>
+                      <input
+                        value={pickup}
+                        onClick={() => {
+                          setIsPanelOpen(true);
+                          setActiveField("pickup");
+                          setIsLocationSelected(false);
+                        }}
+                        onChange={(e) => setpickup(e.target.value)}
+                        className="w-full pl-11 pr-4 py-3.5 bg-gray-50 hover:bg-gray-100 rounded-xl text-base text-gray-900 border border-gray-200 placeholder-gray-505 focus:bg-white focus:border-black focus:outline-none transition-all duration-200"
+                        type="text"
+                        placeholder="Enter pickup location"
+                        autoComplete="off"
+                      />
+                    </div>
+
+                    {/* Destination Field */}
+                    <div className="relative w-full group">
+                      <div className="absolute left-4 top-1/2 -translate-y-1/2 z-30">
+                        <div className="w-2.5 h-2.5 bg-black rounded-sm shadow-sm"></div>
+                      </div>
+                      <input
+                        onClick={() => {
+                          setIsPanelOpen(true);
+                          setActiveField("destination");
+                          setIsLocationSelected(false);
+                        }}
+                        value={destination}
+                        onChange={(e) => setDestination(e.target.value)}
+                        className="w-full pl-11 pr-4 py-3.5 bg-gray-50 hover:bg-gray-100 rounded-xl text-base text-gray-900 border border-gray-200 placeholder-gray-505 focus:bg-white focus:border-black focus:outline-none transition-all duration-200"
+                        type="text"
+                        placeholder="Enter dropoff location"
+                        autoComplete="off"
+                      />
+                    </div>
+
+                    {/* Location Panel - Dropdown absolute */}
+                    {isPanelOpen && (
+                      <div
+                        ref={panelRef}
+                        className="absolute left-0 right-0 top-full mt-2 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-50"
+                      >
+                        <LocationSearchPanel
+                          setIsVehicalPanelOpen={setIsVehicalPanelOpen}
+                          setIsPanelOpen={setIsPanelOpen}
+                          setIsLocationSelected={setIsLocationSelected}
+                          addressList={addressList}
+                          isLoading={isLoading}
+                          setFieldValue={(value) => {
+                            if (activeField === "pickup") setpickup(value);
+                            else setDestination(value);
+                            setIsPanelOpen(false); // Close suggestions panel on selection!
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
                   <button
                     type="button"
-                    onClick={() => {
-                      if (pickup && destination) {
-                        handleSeePrices();
-                      }
-                    }}
-                    className={`flex mt-4 items-center justify-center bg-black hover:bg-gray-800 text-white font-semibold py-3.5 px-6 rounded-xl transition-all duration-200 active:scale-95 w-full md:w-32 cursor-pointer shadow-md shadow-black/10 ${
-                      (!pickup || !destination) ? "opacity-50 cursor-not-allowed" : ""
+                    onClick={handleSeePrices}
+                    className={`w-full py-4 bg-black hover:bg-gray-800 text-white font-bold rounded-xl transition-all duration-200 cursor-pointer shadow-lg shadow-black/10 flex items-center justify-center gap-2 ${
+                      (!pickup || !destination) ? "opacity-50 cursor-not-allowed" : "active:scale-[0.98]"
                     }`}
                     disabled={!pickup || !destination}
                   >
-                    See prices
+                    <span>See Prices</span>
+                    <i className="ri-arrow-right-line"></i>
                   </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsVehicalPanelOpen(true);
-                    }}
-                    className="flex mt-4 items-center justify-center bg-black hover:bg-gray-800 text-white font-semibold py-3.5 px-6 rounded-xl transition-all duration-200 active:scale-95 w-full md:w-40 cursor-pointer shadow-md shadow-black/10"
-                  >
-                    Choose vehicle
-                  </button>
-                )}
+                </form>
               </div>
-            </form>
 
-            {/* Location Panel - Dropdown on web, bottom-sheet slide on mobile */}
-            {isPanelOpen && (
-              <div
-                ref={panelRef}
-                className="bg-white rounded-t-3xl md:rounded-2xl shadow-[0_-5px_40px_rgba(0,0,0,0.15)] md:shadow-xl md:border border-gray-100 overflow-hidden md:mt-4 md:absolute md:w-[120%] z-40"
-              >
-                <LocationSearchPanel
-                  setIsVehicalPanelOpen={setIsVehicalPanelOpen}
-                  setIsPanelOpen={setIsPanelOpen}
-                  setIsLocationSelected={setIsLocationSelected}
-                  addressList={addressList}
-                  isLoading={isLoading}
-                  setFieldValue={(value) => {
-                    if (activeField === "pickup") setpickup(value);
-                    else setDestination(value);
-                  }}
-                />
+              {/* Right Column: Premium Hero Graphic / Card */}
+              <div className="md:col-span-5 hidden md:block">
+                <div className="relative rounded-2xl overflow-hidden aspect-[4/3] bg-gradient-to-br from-gray-900 to-gray-800 flex flex-col justify-end p-8 text-white shadow-md">
+                  <div className="absolute top-0 right-0 p-6 opacity-20">
+                    <i className="ri-roadster-fill text-[120px]"></i>
+                  </div>
+                  <div className="z-10">
+                    <h3 className="text-2xl font-bold mb-2">Intercity Travel</h3>
+                    <p className="text-gray-300 text-sm leading-relaxed">
+                      Travel between cities with premium vehicles and expert captains. Fast booking and live route tracking.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: Recent Rides (conditional on auth & availability) */}
+            {isAuthenticated && recentRides.length > 0 && (
+              <div className="flex flex-col gap-4">
+                <h2 className="text-xl font-bold text-gray-950 flex items-center gap-2">
+                  <i className="ri-history-line text-gray-500"></i>
+                  <span>Recent Rides</span>
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {recentRides.map((ride) => (
+                    <div
+                      key={ride._id}
+                      onClick={() => handleRecentRideClick(ride)}
+                      className="bg-white p-5 rounded-2xl border border-gray-150 hover:border-black cursor-pointer shadow-xs transition-all hover:shadow-md active:scale-[0.99] flex flex-col justify-between"
+                    >
+                      <div className="flex flex-col gap-3">
+                        <div className="flex items-start gap-2.5">
+                          <div className="flex flex-col items-center gap-0.5 pt-1 shrink-0">
+                            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                            <div className="w-px h-4 bg-gray-200"></div>
+                            <div className="w-2 h-2 rounded-sm bg-gray-900"></div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-gray-900 truncate">
+                              {ride.pickup?.address || ride.pickup || "Pickup"}
+                            </p>
+                            <p className="text-xs text-gray-500 truncate mt-1">
+                              {ride.destination?.address || ride.destination || "Destination"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100 text-xs">
+                        <span className="text-gray-400 capitalize">{ride.vehicleType || "Ride"}</span>
+                        <span className="font-bold text-gray-900">₹{ride.fare}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
-          </div>
-        </div>
 
-        {/* Right Side: Massive Rounded Map (Desktop Only) */}
-        <div className="hidden md:block flex-1 p-6 md:pl-12 pb-12 z-0">
-          <div className="w-full h-[85vh] rounded-3xl overflow-hidden shadow-sm relative">
-            <LiveTracking rideData={rideData} isCaptain={false} pickup={pickup} destination={destination} />
+            {/* Section 3: Promotional Banner */}
+            <div className="bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-3xl p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6 shadow-md">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-2xl">
+                  <i className="ri-coupon-2-fill"></i>
+                </div>
+                <div>
+                  <h3 className="text-lg md:text-xl font-bold">Intercity Special Offer</h3>
+                  <p className="text-white/80 text-sm mt-1">Get 20% off your first Intercity ride! Valid for limited time.</p>
+                </div>
+              </div>
+              <div className="bg-white text-orange-600 font-black px-6 py-3 rounded-xl tracking-wider text-sm md:text-base shadow-sm">
+                MOVENTO20
+              </div>
+            </div>
+
+            {/* Section 4: Value Prop Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-xs flex flex-col gap-3">
+                <div className="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center text-xl">
+                  <i className="ri-roadster-fill"></i>
+                </div>
+                <h3 className="text-base font-bold text-gray-900 mt-2">Ride Anywhere</h3>
+                <p className="text-gray-500 text-xs leading-relaxed">
+                  Affordable cars, autos, and motorbikes at your doorstep. Move around the city or travel to another city with ease.
+                </p>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-xs flex flex-col gap-3">
+                <div className="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center text-xl">
+                  <i className="ri-time-fill"></i>
+                </div>
+                <h3 className="text-base font-bold text-gray-900 mt-2">Fast Pickup</h3>
+                <p className="text-gray-500 text-xs leading-relaxed">
+                  Our captains arrive in minutes, ready to take you safely. No long waiting hours or sudden cancellations.
+                </p>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-xs flex flex-col gap-3">
+                <div className="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center text-xl">
+                  <i className="ri-shield-check-fill"></i>
+                </div>
+                <h3 className="text-base font-bold text-gray-900 mt-2">Safe & Secure</h3>
+                <p className="text-gray-500 text-xs leading-relaxed">
+                  Verified drivers, live tracking, and secure OTP validation on every trip. Your safety is our absolute priority.
+                </p>
+              </div>
+            </div>
+
           </div>
         </div>
-      </div>
+      ) : (
+        /* Structure A: Map and Active Panels (Original Layout) */
+        <div className="flex-1 flex flex-col md:flex-row w-full max-w-[1920px] mx-auto z-10 pointer-events-none md:pointer-events-auto h-full pt-[72px] md:pt-0">
+          {/* Mobile background (Instead of Map) */}
+          <div className="absolute inset-0 z-0 md:hidden bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 flex items-center justify-center">
+            <div className="opacity-[0.03] transform scale-150 pointer-events-none">
+              <i className="ri-roadster-fill text-[300px]"></i>
+            </div>
+          </div>
+
+          {/* Left Side: Search Panel */}
+          <div className="w-full md:w-[450px] lg:w-[500px] h-full flex flex-col justify-end md:justify-start pointer-events-none md:pt-16 md:pl-16 z-20">
+            <div className="bg-white rounded-t-[2.5rem] md:rounded-none w-full p-6 md:p-0 pointer-events-auto transition-all shadow-[0_-12px_40px_rgba(0,0,0,0.12)] md:shadow-none pb-8 md:pb-0 relative border-t border-gray-100 md:border-t-0">
+              {/* Drag Handle for Mobile Bottom Sheet */}
+              <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-5 md:hidden"></div>
+              <button
+                ref={panelCloseRef}
+                onClick={() => {
+                  setIsPanelOpen(false);
+                  setfare({}); // go back to landing if closed
+                }}
+                className="md:hidden absolute top-4 right-4 text-gray-500 hover:text-gray-900 focus:outline-none"
+              >
+                <i className="ri-arrow-down-wide-line text-2xl"></i>
+              </button>
+
+              {/* Desktop Headline */}
+              <h1 className="hidden md:block text-5xl lg:text-[54px] font-bold tracking-tight mb-8 text-black leading-[1.1]">
+                Request a ride for now or later
+              </h1>
+
+              {/* Mobile Headline */}
+              <h4 className="md:hidden text-2xl font-bold mb-5 text-gray-900">
+                Where to?
+              </h4>
+
+              <form onSubmit={submitHandler} className="w-full relative">
+                <div className="flex flex-col gap-3 w-full relative">
+                  {/* Connecting Line (Only spans between the two inputs) */}
+                  <div className="absolute left-[20px] md:left-[22px] top-6 bottom-6 w-[2px] bg-black z-20 hidden md:block"></div>
+                  <div className="md:hidden absolute left-[20px] top-6 bottom-6 w-0.5 bg-gray-300 z-10"></div>
+
+                  {/* Pickup Field */}
+                  <div className="relative w-full group">
+                    <div className="absolute left-4 md:left-4 top-1/2 transform -translate-y-1/2 z-30">
+                      <div className="w-2 md:w-3 h-2 md:h-3 bg-black rounded-full shadow-sm"></div>
+                    </div>
+                    <input
+                      value={pickup}
+                      onClick={() => {
+                        setIsPanelOpen(true);
+                        setActiveField("pickup");
+                        setIsLocationSelected(false);
+                      }}
+                      onChange={(e) => setpickup(e.target.value)}
+                      className="w-full pl-10 md:pl-12 pr-4 py-3 md:py-4 bg-gray-100 rounded-lg md:rounded-xl text-base placeholder-black focus:bg-gray-200 focus:outline-none transition-all duration-200"
+                      type="text"
+                      placeholder="Pickup location"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Destination Field */}
+                  <div className="relative w-full group">
+                    <div className="absolute left-4 md:left-4 top-1/2 transform -translate-y-1/2 z-30">
+                      <div className="w-2 md:w-3 h-2 md:h-3 bg-black rounded-sm shadow-sm"></div>
+                    </div>
+                    <input
+                      onClick={() => {
+                        setIsPanelOpen(true);
+                        setActiveField("destination");
+                        setIsLocationSelected(false);
+                      }}
+                      value={destination}
+                      onChange={(e) => setDestination(e.target.value)}
+                      className="w-full pl-10 md:pl-12 pr-4 py-3 md:py-4 bg-gray-100 rounded-lg md:rounded-xl text-base placeholder-black focus:bg-gray-200 focus:outline-none transition-all duration-200"
+                      type="text"
+                      placeholder="Dropoff location"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Search / Choose Vehicle Button (Responsive) */}
+                  {!fare.car ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (pickup && destination) {
+                          handleSeePrices();
+                        }
+                      }}
+                      className={`flex mt-4 items-center justify-center bg-black hover:bg-gray-800 text-white font-semibold py-3.5 px-6 rounded-xl transition-all duration-200 active:scale-95 w-full md:w-32 cursor-pointer shadow-md shadow-black/10 ${
+                        (!pickup || !destination) ? "opacity-50 cursor-not-allowed" : ""
+                      }`}
+                      disabled={!pickup || !destination}
+                    >
+                      See prices
+                    </button>
+                  ) : (
+                    <div className="flex gap-3 mt-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsVehicalPanelOpen(true);
+                        }}
+                        className="flex items-center justify-center bg-black hover:bg-gray-800 text-white font-semibold py-3.5 px-6 rounded-xl transition-all duration-200 active:scale-95 w-full md:w-40 cursor-pointer shadow-md shadow-black/10"
+                      >
+                        Choose vehicle
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setfare({});
+                          setpickup("");
+                          setDestination("");
+                        }}
+                        className="flex items-center justify-center bg-gray-200 hover:bg-gray-300 text-black font-semibold py-3.5 px-4 rounded-xl transition-all duration-200 active:scale-95 cursor-pointer shadow-xs"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </form>
+
+              {/* Location Panel - Dropdown on web, bottom-sheet slide on mobile */}
+              {isPanelOpen && (
+                <div
+                  ref={panelRef}
+                  className="bg-white rounded-t-3xl md:rounded-2xl shadow-[0_-5px_40px_rgba(0,0,0,0.15)] md:shadow-xl md:border border-gray-100 overflow-hidden md:mt-4 md:absolute md:w-[120%] z-40"
+                >
+                  <LocationSearchPanel
+                    setIsVehicalPanelOpen={setIsVehicalPanelOpen}
+                    setIsPanelOpen={setIsPanelOpen}
+                    setIsLocationSelected={setIsLocationSelected}
+                    addressList={addressList}
+                    isLoading={isLoading}
+                    setFieldValue={(value) => {
+                      if (activeField === "pickup") setpickup(value);
+                      else setDestination(value);
+                      setIsPanelOpen(false); // Close suggestions panel on selection!
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Side: Premium Card (Instead of Map) */}
+          <div className="hidden md:flex flex-1 p-6 md:pl-12 pb-12 z-0 items-center justify-center">
+            <div className="w-full h-[85vh] rounded-[2.5rem] overflow-hidden shadow-lg relative bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 flex flex-col justify-between p-12 text-white border border-gray-800">
+              {/* Decorative large icon background */}
+              <div className="absolute right-0 bottom-0 p-8 opacity-10 pointer-events-none">
+                <i className="ri-roadster-fill text-[300px]"></i>
+              </div>
+              
+              {/* Header section inside the illustration */}
+              <div className="z-10">
+                <span className="bg-white/10 text-white text-xs font-bold px-3 py-1.5 rounded-full uppercase tracking-wider backdrop-blur-md">
+                  Booking Status
+                </span>
+                <h2 className="text-4xl lg:text-5xl font-black mt-6 tracking-tight leading-none">
+                  Ready to roll?
+                </h2>
+                <p className="text-gray-400 text-sm md:text-base mt-4 max-w-md leading-relaxed">
+                  Select your vehicle, choose payment method, and confirm. Your map and driver tracking will load once a Captain accepts your ride.
+                </p>
+              </div>
+
+              {/* Footer message / premium micro-animation indicator */}
+              <div className="z-10 flex items-center gap-3 border-t border-white/10 pt-6">
+                <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse"></div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Google Maps will activate post-match
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Side Panels - React state controls visibility (no GSAP to avoid conflicts) */}
 
@@ -707,7 +999,12 @@ function Home() {
         <VehicalPanel
           fare={fare}
           setVehicleType={setVehicleType}
-          setIsVehicalPanelOpen={setIsVehicalPanelOpen}
+          setIsVehicalPanelOpen={(val) => {
+            setIsVehicalPanelOpen(val);
+            if (!val) {
+              setfare({}); // Reset fare to return to landing page
+            }
+          }}
           setIsVehicleSearchOpen={setIsVehicleSearchOpen}
           createRide={handleCreateRide}
         />
@@ -744,29 +1041,7 @@ function Home() {
         />
       </div>
 
-      {/* Waiting for Driver Panel — always mounted, shown via state */}
-      <div
-        style={{ display: isDriverWaitingOpen ? "block" : "none" }}
-        className="fixed z-50 bottom-0 left-0 right-0 md:left-12 md:right-auto md:bottom-auto md:top-[120px] md:h-fit md:max-h-[calc(100vh-140px)] md:w-[450px] bg-white rounded-t-3xl md:rounded-3xl shadow-[0_-5px_30px_rgba(0,0,0,0.2)] md:shadow-2xl md:border border-gray-100 overflow-hidden w-full"
-      >
-        <WaitingForDriver
-          socket={socket}
-          rideData={rideData}
-          setIsDriverWaitingOpen={setIsDriverWaitingOpen}
-          setIsRideAccepted={setIsRideAccepted}
-        />
-      </div>
-
-      {/* Floating button to check the current ride (accepted, waiting for driver) */}
-      {isRideAccepted && !isDriverWaitingOpen && (
-        <button
-          onClick={() => setIsDriverWaitingOpen(true)}
-          className="fixed bottom-6 right-6 z-40 bg-black hover:bg-gray-800 text-white p-4 rounded-full shadow-2xl transition-all duration-300 hover:scale-105"
-          title="Show Ride Info"
-        >
-          <i className="ri-car-fill text-2xl"></i>
-        </button>
-      )}
+      {/* Waiting for Driver panel is handled on Riding.jsx */}
 
       {/* Resume Ride banner for ongoing rides — no forced redirect */}
       {activeOngoingRide && !isRideAccepted && (

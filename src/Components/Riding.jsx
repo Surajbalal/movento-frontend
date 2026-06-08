@@ -6,6 +6,8 @@ import LiveTracking from "../Components/LiveTracking";
 import useRideRoom from "../Hooks/useRideRoom";
 import PaymentButton from "./PaymentButton";
 import { UserDataContext } from "../Context/UserContext";
+import Call from "./Call";
+import axiosInstance from "../api/axiosInstance";
 
 // ─── Helpers ─────────────────────────────────────────────
 const STATUS_CONFIG = {
@@ -90,6 +92,41 @@ function Riding() {
   const [showNavMenu, setShowNavMenu] = useState(false);
   const { user } = useContext(UserDataContext);
 
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelStep, setCancelStep] = useState(1);
+  const [cancelReason, setCancelReason] = useState("");
+  const [otherReason, setOtherReason] = useState("");
+  const defaultReasons = ["Driver is too far", "Changed my mind", "Wait time is too long", "Other"];
+
+  const handleCancelRide = async () => {
+    try {
+      const response = await axiosInstance.post('/rides/cancel', {
+        rideId: rideData?._id,
+        reason: cancelReason,
+        note: otherReason
+      });
+      if (response.status === 200) {
+        setShowCancelModal(false);
+        setCancelStep(1);
+        setCancelReason("");
+        setOtherReason("");
+        navigate("/");
+      }
+    } catch (error) {
+      console.error("Error cancelling ride:", error);
+      alert(error.response?.data?.message || "Failed to cancel ride.");
+    }
+  };
+
+  const closeCancelModal = () => {
+    setShowCancelModal(false);
+    setTimeout(() => {
+      setCancelStep(1);
+      setCancelReason("");
+      setOtherReason("");
+    }, 300);
+  };
+
   // ─── Socket: ride-ended ────────────────────────────────
   useEffect(() => {
     const cleanup = receiveMessage("ride-ended", () => {
@@ -99,6 +136,27 @@ function Riding() {
 
     return cleanup;
   }, [socket, receiveMessage]);
+
+  // ─── Socket: ride-started ──────────────────────────────
+  useEffect(() => {
+    const cleanup = receiveMessage("ride-started", (ride) => {
+      console.log("ride-started received", ride);
+      setRideData(ride);
+    });
+
+    return cleanup;
+  }, [socket, receiveMessage]);
+
+  // ─── Socket: ride-cancelled ────────────────────────────
+  useEffect(() => {
+    const cleanup = receiveMessage("ride-cancelled", (data) => {
+      console.log("ride-cancelled received", data);
+      alert(`Ride cancelled: ${data?.reason || "No reason provided"}`);
+      navigate("/");
+    });
+
+    return cleanup;
+  }, [socket, receiveMessage, navigate]);
 
   // ─── Socket: payment-status-updated ────────────────────
   useEffect(() => {
@@ -367,6 +425,50 @@ function Riding() {
                   </p>
                 </div>
               </div>
+
+              {/* Prominent OTP in collapsed view */}
+              {status === "accepted" && rideData?.otp && (
+                <div className="mt-3 p-3 bg-gray-50 rounded-xl border border-gray-100 flex items-center justify-between animate-fade-in">
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Share OTP to Start</p>
+                    <p className="text-2xl font-black tracking-widest text-gray-900">{rideData.otp}</p>
+                  </div>
+                  <p className="text-[10px] text-gray-500 text-right max-w-[150px] leading-snug">
+                    Give this OTP to the captain when they arrive.
+                  </p>
+                </div>
+              )}
+
+              {/* Collapsed actions */}
+              {(status === "accepted" || status === "ongoing") && (
+                <div className="flex gap-3 mt-3">
+                  {status === "accepted" && (
+                    <button
+                      onClick={() => setShowCancelModal(true)}
+                      className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 text-red-650 hover:bg-red-100 transition-all font-semibold text-xs focus:outline-none border border-red-100 cursor-pointer"
+                      title="Cancel Ride"
+                    >
+                      <i className="ri-close-circle-line text-base"></i>
+                      <span>Cancel</span>
+                    </button>
+                  )}
+                  <Call
+                    rideId={rideData?._id}
+                    callerId={rideData?.user}
+                    receiverId={rideData?.captain?._id}
+                    renderTrigger={(onCall) => (
+                      <button
+                        onClick={onCall}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-gray-200 hover:border-black hover:bg-gray-50 transition-all font-semibold text-xs text-gray-900 focus:outline-none cursor-pointer"
+                      >
+                        <i className="ri-phone-line text-base"></i>
+                        <span>Call Captain</span>
+                      </button>
+                    )}
+                  />
+                </div>
+              )}
+
               {/* Tap hint */}
               <p className="text-center text-[10px] text-gray-400 font-medium mt-3">
                 Tap to see ride details
@@ -503,6 +605,35 @@ function Riding() {
                   )}
                 </div>
               </div>
+
+              {/* Action buttons in expanded view */}
+              {(status === "accepted" || status === "ongoing") && (
+                <div className="flex gap-3 py-4 border-t border-gray-100 mt-4">
+                  {status === "accepted" && (
+                    <button
+                      onClick={() => setShowCancelModal(true)}
+                      className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 transition-all font-semibold text-xs focus:outline-none border border-red-100 cursor-pointer"
+                    >
+                      <i className="ri-close-circle-line text-lg"></i>
+                      <span>Cancel Ride</span>
+                    </button>
+                  )}
+                  <Call
+                    rideId={rideData?._id}
+                    callerId={rideData?.user}
+                    receiverId={rideData?.captain?._id}
+                    renderTrigger={(onCall) => (
+                      <button
+                        onClick={onCall}
+                        className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border border-gray-200 hover:border-black hover:bg-gray-50 transition-all font-semibold text-xs text-gray-900 focus:outline-none cursor-pointer"
+                      >
+                        <i className="ri-phone-line text-lg"></i>
+                        <span>Call Captain</span>
+                      </button>
+                    )}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -516,6 +647,84 @@ function Riding() {
           rideData={rideData}
           onClose={() => setShowRatingPopup(false)}
         />
+      )}
+
+      {/* ═══════════════════════════════════════════════════
+          CANCELLATION MODAL
+          ═══════════════════════════════════════════════════ */}
+      {showCancelModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm pointer-events-auto animate-fade-in">
+          <div className="bg-white w-full max-w-md rounded-t-3xl p-6 shadow-xl relative animate-slide-up">
+            <button 
+              onClick={closeCancelModal}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-900 focus:outline-none cursor-pointer"
+            >
+              <i className="ri-close-line text-2xl"></i>
+            </button>
+            
+            {cancelStep === 1 ? (
+              <>
+                <h3 className="text-xl font-bold text-gray-900 mb-4">Cancel Ride</h3>
+                <p className="text-sm text-gray-500 mb-5">Select reason (required)</p>
+
+                <div className="space-y-3 mb-6">
+                  {defaultReasons.map((reason, index) => (
+                    <button 
+                      key={index} 
+                      onClick={() => {
+                        setCancelReason(reason);
+                        setCancelStep(2);
+                      }}
+                      className="w-full flex items-center justify-between p-4 rounded-xl border border-gray-100 hover:border-black transition-all focus:outline-none text-left cursor-pointer"
+                    >
+                      <span className="text-sm font-medium text-gray-900">{reason}</span>
+                      <i className="ri-arrow-right-s-line text-gray-400 text-lg"></i>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-3 mb-4">
+                  <button 
+                    onClick={() => setCancelStep(1)}
+                    className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 transition-colors focus:outline-none cursor-pointer"
+                  >
+                    <i className="ri-arrow-left-line text-gray-600"></i>
+                  </button>
+                  <h3 className="text-xl font-bold text-gray-900">Add Feedback</h3>
+                </div>
+                
+                <div className="bg-gray-50 p-3 rounded-lg mb-5 border border-gray-100">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">Selected Reason</p>
+                  <p className="text-sm font-medium text-gray-900">{cancelReason}</p>
+                </div>
+
+                <div className="mb-6">
+                  <p className="text-sm text-gray-500 mb-2">
+                    {cancelReason === 'Other' ? 'Please specify (required)' : 'Additional notes (optional)'}
+                  </p>
+                  <textarea 
+                    value={otherReason}
+                    onChange={(e) => setOtherReason(e.target.value)}
+                    placeholder={cancelReason === 'Other' ? "Write your reason here..." : "Tell us more about why you're cancelling..."}
+                    className="w-full p-4 border border-gray-200 rounded-xl focus:outline-none focus:border-black resize-none h-28 text-sm transition-colors"
+                  />
+                </div>
+
+                <div className="flex gap-3">
+                  <button 
+                    onClick={handleCancelRide}
+                    disabled={cancelReason === 'Other' && !otherReason.trim()}
+                    className="w-full py-4 rounded-xl bg-red-600 text-white font-medium hover:bg-red-750 transition-all focus:outline-none shadow-sm active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+                  >
+                    Submit Cancellation
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {/* ═══════════════════════════════════════════════════
