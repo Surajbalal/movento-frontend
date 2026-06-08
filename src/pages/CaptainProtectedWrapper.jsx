@@ -12,7 +12,7 @@ function CaptainProtectedWrapper({children}) {
     const token = localStorage.getItem("captain-token");
     useEffect(() => {
     if (!token) {
-      navigate("/captain-login");
+      navigate("/drive");
       return;
     }
 
@@ -33,7 +33,7 @@ function CaptainProtectedWrapper({children}) {
           // 401 Unauthorized or other actual errors
           console.log(err);
           localStorage.removeItem("captain-token");
-          navigate("/captain-login");
+          navigate("/drive");
         });
     };
 

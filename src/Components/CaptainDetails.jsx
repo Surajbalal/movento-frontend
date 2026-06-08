@@ -2,121 +2,126 @@ import React, { useContext } from "react";
 import { CaptainDataContext } from "../Context/CaptainContext";
 import { useNavigate } from "react-router-dom";
 
-function CaptainDetails(props) {
+function CaptainDetails({ stats, isCaptainDetailLoading }) {
   const { captain } = useContext(CaptainDataContext);
   const navigate = useNavigate();
 
+  const vehicleType = captain?.vehicle?.vehicleType || "car";
+  const vehicleIcon =
+    vehicleType === "motorcycle"
+      ? "ri-motorbike-fill"
+      : vehicleType === "auto"
+      ? "ri-taxi-fill"
+      : "ri-car-fill";
+
+  if (isCaptainDetailLoading) {
+    return (
+      <div className="p-6 flex items-center justify-center gap-3 text-gray-500">
+        <div className="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+        <span className="text-sm font-medium">Loading...</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="p-4 sm:p-6">
-      {/* Captain Profile Card */}
-      {props.isCaptainDetailLoading ? (
-        // <div className="h-screen flex items-center justify-center">
-          <div className="flex items-center gap-3 text-gray-600">
-            <i className="ri-loader-2-line animate-spin text-2xl"></i>
-            <span className="text-lg font-medium">
-              Loading captain details...
-            </span>
-          {/* </div> */}
+    <div className="px-5 pb-8 pt-4">
+      {/* ── Captain Profile Row ──────────────── */}
+      <div className="flex items-center justify-between pb-5 border-b border-gray-100">
+        <div className="flex items-center gap-3.5">
+          <div className="relative">
+            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-green-100 to-emerald-100 flex items-center justify-center border-2 border-white shadow-md">
+              <i className="ri-steering-fill text-2xl text-green-600"></i>
+            </div>
+            <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
+          </div>
+          <div>
+            <h4 className="text-base font-black text-gray-900 tracking-tight leading-tight">
+              {captain?.fullName?.firstName || "Captain"}{" "}
+              {captain?.fullName?.lastName || ""}
+            </h4>
+            <div className="flex items-center gap-1.5 mt-1">
+              <div className="flex items-center gap-0.5 bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                <i className="ri-star-fill text-[10px]"></i>
+                <span>4.8</span>
+              </div>
+              <span className="text-gray-300 text-xs">•</span>
+              <span className="text-xs font-semibold text-gray-500 capitalize tracking-wide">
+                {vehicleType} Captain
+              </span>
+            </div>
+          </div>
         </div>
-      ) : (
-        <>
-          <div className="bg-white rounded-xl sm:rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6 mb-4 sm:mb-6">
-            <div className="flex items-center justify-between mb-4 sm:mb-6">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="relative">
-                  <img
-                    className="h-12 w-12 sm:h-14 sm:w-14 rounded-full object-cover border-2 border-gray-200"
-                    src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTTwWx-yHxLBZw1Gr0DymmtXVDPEDaJIVdRQQ&s"
-                    alt="Captain"
-                  />
-                  <div className="absolute bottom-0 right-0 h-3 w-3 bg-green-500 border-2 border-white rounded-full"></div>
-                </div>
-                <div>
-                  <h4 className="text-base sm:text-lg font-semibold text-gray-900">
-                    {captain.fullName.firstName} {captain.fullName.lastName||0}
-                  </h4>
-                  <p className="text-xs sm:text-sm text-gray-500">Captain</p>
-                </div>
-              </div>
-              <div className="text-right">
-                <h4 className="text-xl sm:text-2xl font-bold text-gray-900">
-                  ₹{props.stats.totalEarnings||0}
-                </h4>
-                <p className="text-xs sm:text-sm text-gray-500">
-                  Today's Earnings
-                </p>
-              </div>
-            </div>
+        <div className="text-right bg-green-50/70 border border-green-100 px-3.5 py-2 rounded-2xl">
+          <p className="text-[9px] font-bold text-green-700 uppercase tracking-widest leading-none mb-1">
+            Today
+          </p>
+          <p className="text-xl font-black text-green-800 tracking-tight leading-none">
+            ₹{stats?.totalEarnings || 0}
+          </p>
+        </div>
+      </div>
 
-            {/* Quick Stats */}
-            <div className="grid grid-cols-3 gap-2 sm:gap-4">
-              <div className="text-center p-2 sm:p-3 bg-gray-50 rounded-lg">
-                <i className="text-xl sm:text-2xl text-gray-600 ri-time-line mb-1"></i>
-                <h5 className="text-sm sm:text-base font-semibold text-gray-900">
-                  8.5
-                </h5>
-                <p className="text-xs text-gray-500">Hours Online</p>
-              </div>
-              <div className="text-center p-2 sm:p-3 bg-gray-50 rounded-lg">
-                <i className="text-xl sm:text-2xl text-gray-600 ri-speed-up-line mb-1"></i>
-                <h5 className="text-sm sm:text-base font-semibold text-gray-900">
-                  {props.stats.totalRides||0}
-                </h5>
-                <p className="text-xs text-gray-500">Total Rides</p>
-              </div>
-              <div className="text-center p-2 sm:p-3 bg-gray-50 rounded-lg">
-                <i className="text-xl sm:text-2xl text-gray-600 ri-star-line mb-1"></i>
-                <h5 className="text-sm sm:text-base font-semibold text-gray-900">
-                  4.8
-                </h5>
-                <p className="text-xs text-gray-500">Rating</p>
-              </div>
-            </div>
-          </div>
+      {/* ── Stats Grid ────────────────────────── */}
+      <div className="grid grid-cols-3 gap-3.5 py-5 border-b border-gray-100">
+        <div className="text-center py-3.5 bg-gray-50/80 rounded-2xl border border-gray-100 hover:bg-gray-100/55 transition-colors">
+          <p className="text-xl font-extrabold text-gray-900 tracking-tight">
+            {stats?.totalRides || 0}
+          </p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">
+            Rides
+          </p>
+        </div>
+        <div className="text-center py-3.5 bg-gray-50/80 rounded-2xl border border-gray-100 hover:bg-gray-100/55 transition-colors">
+          <p className="text-xl font-extrabold text-gray-900 tracking-tight">8.5</p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">
+            Hours
+          </p>
+        </div>
+        <div className="text-center py-3.5 bg-gray-50/80 rounded-2xl border border-gray-100 hover:bg-gray-100/55 transition-colors">
+          <p className="text-xl font-extrabold text-gray-900 tracking-tight">4.8</p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">
+            Rating
+          </p>
+        </div>
+      </div>
 
-          {/* Vehicle Info */}
-          <div className="bg-white rounded-xl sm:rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
-            <h5 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">
-              Your Vehicle
-            </h5>
-            <div className="flex items-center gap-3 sm:gap-4">
-              <div className="bg-gray-100 h-12 w-12 sm:h-14 sm:w-14 rounded-lg flex items-center justify-center">
-                <i className="text-xl sm:text-2xl text-gray-600 ri-car-line"></i>
-              </div>
-              <div className="flex-1">
-                <h6 className="text-sm sm:text-base font-medium text-gray-900">
-                  {captain.vehicle?.vehicleType?.charAt(0).toUpperCase() +
-                    captain.vehicle?.vehicleType?.slice(1) || "Car"}
-                </h6>
-                <p className="text-xs sm:text-sm text-gray-500">
-                  {captain.vehicle?.plate || "MH-01-AB-1234"}
-                </p>
-                <p className="text-xs text-gray-400">
-                  {captain.vehicle?.color || "White"}
-                </p>
-              </div>
-            </div>
+      {/* ── Vehicle Info ──────────────────────── */}
+      <div className="my-5 p-4 bg-gray-50/50 border border-gray-100 rounded-2xl flex items-center justify-between gap-3 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-white border border-gray-100 rounded-xl flex items-center justify-center shadow-xs">
+            <i className={`${vehicleIcon} text-2xl text-gray-800`}></i>
           </div>
+          <div className="min-w-0">
+            <p className="text-sm font-extrabold text-gray-900 capitalize tracking-tight">
+              {vehicleType} Details
+            </p>
+            <p className="text-xs font-medium text-gray-500 mt-0.5">
+              {captain?.vehicle?.color ? `${captain.vehicle.color} Color` : "Color unspecified"}
+            </p>
+          </div>
+        </div>
+        <div className="bg-gray-950 text-white text-[11px] font-black px-3.5 py-2 rounded-xl tracking-widest uppercase shadow-md shadow-black/10 select-all font-mono">
+          {captain?.vehicle?.plate || "—"}
+        </div>
+      </div>
 
-          {/* Quick Actions */}
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 mt-4 sm:mt-6">
-            <button
-              onClick={() => navigate("/captain-settings")}
-              className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 sm:py-3 px-3 sm:px-4 rounded-lg text-sm sm:text-base transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-300"
-            >
-              <i className="ri-settings-3-line mr-1 sm:mr-2"></i>
-              Settings
-            </button>
-            <button
-              onClick={() => navigate("/captain-history")}
-              className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 sm:py-3 px-3 sm:px-4 rounded-lg text-sm sm:text-base transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-300"
-            >
-              <i className="ri-history-line mr-1 sm:mr-2"></i>
-              History
-            </button>
-          </div>
-        </>
-      )}
+      {/* ── Quick Actions ─────────────────────── */}
+      <div className="grid grid-cols-2 gap-3.5 pt-2">
+        <button
+          onClick={() => navigate("/captain-settings")}
+          className="flex items-center justify-center gap-2 py-3.5 bg-gray-100 hover:bg-gray-200/80 active:scale-95 rounded-xl text-sm font-bold text-gray-800 transition-all cursor-pointer border border-gray-200"
+        >
+          <i className="ri-settings-3-fill text-base text-gray-600"></i>
+          Settings
+        </button>
+        <button
+          onClick={() => navigate("/captain-history")}
+          className="flex items-center justify-center gap-2 py-3.5 bg-gray-100 hover:bg-gray-200/80 active:scale-95 rounded-xl text-sm font-bold text-gray-800 transition-all cursor-pointer border border-gray-200"
+        >
+          <i className="ri-history-fill text-base text-gray-600"></i>
+          History
+        </button>
+      </div>
     </div>
   );
 }

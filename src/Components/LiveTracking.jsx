@@ -3,6 +3,7 @@ import {
   GoogleMap,
   Marker,
   DirectionsRenderer,
+  Polyline,
   useJsApiLoader,
 } from "@react-google-maps/api";
 
@@ -11,7 +12,7 @@ const containerStyle = {
   height: "100%",
 };
 
-export default function LiveTracking({ rideData, isCaptain }) {
+export default function LiveTracking({ rideData, isCaptain, pickup: pickupProp, destination: destinationProp }) {
   const mapRef = useRef(null);
 
   const [userLocation, setUserLocation] = useState(null);
@@ -23,7 +24,7 @@ export default function LiveTracking({ rideData, isCaptain }) {
   });
 
   // ===============================
-  // 📍 Extract Pickup & Destination
+  // Extract Pickup & Destination
   // ===============================
   const pickup = useMemo(() => {
     if (rideData?.pickup?.location?.coordinates) {
@@ -32,8 +33,8 @@ export default function LiveTracking({ rideData, isCaptain }) {
         lng: Number(rideData.pickup.location.coordinates[0]),
       };
     }
-    return null;
-  }, [rideData]);
+    return pickupProp || null;
+  }, [rideData, pickupProp]);
 
   const destination = useMemo(() => {
     if (rideData?.destination?.location?.coordinates) {
@@ -42,8 +43,43 @@ export default function LiveTracking({ rideData, isCaptain }) {
         lng: Number(rideData.destination.location.coordinates[0]),
       };
     }
+    return destinationProp || null;
+  }, [rideData, destinationProp]);
+
+  // Geocoded coordinates fallback for string inputs (e.g. during Fare Preview)
+  const resolvedPickup = useMemo(() => {
+    if (!pickup) return null;
+    if (typeof pickup === "object" && pickup.lat && pickup.lng) {
+      return pickup;
+    }
+    if (directions) {
+      const leg = directions.routes[0]?.legs[0];
+      if (leg?.start_location) {
+        return {
+          lat: leg.start_location.lat(),
+          lng: leg.start_location.lng(),
+        };
+      }
+    }
     return null;
-  }, [rideData]);
+  }, [pickup, directions]);
+
+  const resolvedDestination = useMemo(() => {
+    if (!destination) return null;
+    if (typeof destination === "object" && destination.lat && destination.lng) {
+      return destination;
+    }
+    if (directions) {
+      const leg = directions.routes[0]?.legs[0];
+      if (leg?.end_location) {
+        return {
+          lat: leg.end_location.lat(),
+          lng: leg.end_location.lng(),
+        };
+      }
+    }
+    return null;
+  }, [destination, directions]);
 
   // ===============================
   // 👤 Get User Location
@@ -98,10 +134,20 @@ export default function LiveTracking({ rideData, isCaptain }) {
   }, [rideData, isCaptain]);
 
   // ===============================
-  // 🧠 Route Logic
+  // Route Logic
   // ===============================
   const routeInfo = useMemo(() => {
-    if (!rideData) return { showRoute: false };
+    if (!rideData) {
+      // No ride data yet — if pickup and destination exist, show route preview
+      if (pickup && destination) {
+        return {
+          origin: pickup,
+          destination: destination,
+          showRoute: true,
+        };
+      }
+      return { showRoute: false };
+    }
 
     const status = rideData.status;
 
@@ -123,49 +169,115 @@ export default function LiveTracking({ rideData, isCaptain }) {
       };
     }
 
+    // PENDING or any other status → Pickup to Destination (route preview)
+    if (pickup && destination) {
+      return {
+        origin: pickup,
+        destination: destination,
+        showRoute: true,
+      };
+    }
+
     return { showRoute: false };
   }, [rideData, captainLocation, pickup, destination]);
+
+  const originKey = useMemo(() => {
+    if (!routeInfo.origin) return "";
+    if (typeof routeInfo.origin === "string") return routeInfo.origin;
+    if (routeInfo.origin.lat && routeInfo.origin.lng) {
+      return `${routeInfo.origin.lat},${routeInfo.origin.lng}`;
+    }
+    return "";
+  }, [routeInfo.origin]);
+
+  const destinationKey = useMemo(() => {
+    if (!routeInfo.destination) return "";
+    if (typeof routeInfo.destination === "string") return routeInfo.destination;
+    if (routeInfo.destination.lat && routeInfo.destination.lng) {
+      return `${routeInfo.destination.lat},${routeInfo.destination.lng}`;
+    }
+    return "";
+  }, [routeInfo.destination]);
 
   // ===============================
   // 🗺️ Fetch Directions
   // ===============================
- useEffect(() => {
-  if (!isLoaded) return;
-  if (!routeInfo.showRoute) return;
-  if (!routeInfo.origin || !routeInfo.destination) return;
+  // Fetch Directions
+  // ===============================
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (!routeInfo.showRoute) return;
+    if (!routeInfo.origin || !routeInfo.destination) return;
 
-  const service = new window.google.maps.DirectionsService();
-
-  service.route(
-    {
+    console.log("[LiveTracking] Fetching directions:", {
       origin: routeInfo.origin,
       destination: routeInfo.destination,
-      travelMode: window.google.maps.TravelMode.DRIVING,
-    },
-    (result, status) => {
-      if (status === "OK") {
-        setDirections(result);
+    });
 
-        if (mapRef.current) {
-          const bounds = new window.google.maps.LatLngBounds();
-          result.routes[0].overview_path.forEach((point) =>
-            bounds.extend(point)
+    const service = new window.google.maps.DirectionsService();
+
+    service.route(
+      {
+        origin: routeInfo.origin,
+        destination: routeInfo.destination,
+        travelMode: window.google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        if (status === "OK") {
+          console.log("[LiveTracking] Directions OK — rendering route");
+          setDirections(result);
+
+          if (mapRef.current) {
+            const bounds = new window.google.maps.LatLngBounds();
+            result.routes[0].overview_path.forEach((point) =>
+              bounds.extend(point)
+            );
+            mapRef.current.fitBounds(bounds, {
+              top: 60,
+              bottom: 200,
+              left: 40,
+              right: 40,
+            });
+          }
+        } else {
+          console.warn(
+            "[LiveTracking] Directions failed:",
+            status,
+            "- falling back to straight polyline"
           );
-          mapRef.current.fitBounds(bounds);
+          // Clear stale directions so fallback polyline renders
+          setDirections(null);
         }
-      } else {
-        console.log("Directions failed:", status);
       }
-    }
-  );
-}, [
-  isLoaded,
-  routeInfo.origin?.lat,
-  routeInfo.origin?.lng,
-  routeInfo.destination?.lat,
-  routeInfo.destination?.lng,
-]);
+    );
+  }, [isLoaded, routeInfo.showRoute, originKey, destinationKey]);
 
+  // ===============================
+  // 📐 Fit bounds to markers (Fallback when directions is not loaded yet/fails)
+  // ===============================
+  useEffect(() => {
+    if (!isLoaded || !mapRef.current) return;
+    if (!resolvedPickup || !resolvedDestination) return;
+    // Only fit bounds when we don't have directions (directions handler fits its own bounds)
+    if (directions) return;
+
+    const bounds = new window.google.maps.LatLngBounds();
+    bounds.extend(resolvedPickup);
+    bounds.extend(resolvedDestination);
+    if (captainLocation) bounds.extend(captainLocation);
+    mapRef.current.fitBounds(bounds, {
+      top: 50,
+      bottom: 50,
+      left: 50,
+      right: 50,
+    });
+  }, [
+    isLoaded,
+    resolvedPickup,
+    resolvedDestination,
+    captainLocation,
+    directions,
+  ]);
 
   // ===============================
   // 📍 Map Center Fallback
@@ -194,20 +306,31 @@ export default function LiveTracking({ rideData, isCaptain }) {
         {userLocation && <Marker position={userLocation} label="👤" />}
 
         {/* Pickup Marker */}
-        {pickup && <Marker position={pickup} label="P" />}
+        {resolvedPickup && <Marker position={resolvedPickup} label="P" />}
 
-        {/* Destination Marker */}
-        {destination &&
-          (!isCaptain ||
-            rideData?.status === "ongoing" ||
-            rideData?.status === "started") && (
-            <Marker position={destination} label="D" />
-          )}
+        {/* Destination Marker — always show when available */}
+        {resolvedDestination && (
+          <Marker position={resolvedDestination} label="D" />
+        )}
 
-        {/* Route Line */}
+        {/* Route Line — Directions API result */}
         {directions && (
           <DirectionsRenderer
-            options={{ directions, suppressMarkers: true }}
+            directions={directions}
+            options={{ suppressMarkers: true }}
+          />
+        )}
+
+        {/* Fallback Polyline — when Directions API fails but we have endpoints */}
+        {!directions && routeInfo.showRoute && routeInfo.origin && routeInfo.destination && (
+          <Polyline
+            path={[routeInfo.origin, routeInfo.destination]}
+            options={{
+              strokeColor: "#4285F4",
+              strokeOpacity: 0.8,
+              strokeWeight: 4,
+              geodesic: true,
+            }}
           />
         )}
         

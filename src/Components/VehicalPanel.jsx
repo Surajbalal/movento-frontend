@@ -41,11 +41,9 @@ function VehicalPanel(props) {
   };
 
   const handleConfirm = () => {
-    const selectedVehicleData = vehicles.find(v => v.id === selectedVehicle);
     props.setVehicleType(selectedVehicle);
-    props.setIsVehicalPanelOpen(false);
-    props.setIsVehicleSearchOpen(true);
-    // props.setIsSearchingPanelOpen(true);
+    // Panel state transitions are handled by the parent (handleCreateRide)
+    // to ensure they only occur AFTER authentication passes.
     props.createRide();
   };
 

@@ -10,7 +10,7 @@ function UserProtectWrapper({children}) {
     const token = localStorage.getItem('token');
    useEffect(() => {
     if (!token) {
-      navigate('/login');
+      navigate('/');
       return;
     }
 
@@ -31,7 +31,7 @@ function UserProtectWrapper({children}) {
           // 401 Unauthorized or other actual errors
           console.log(err);
           localStorage.removeItem("token");
-          navigate("/login");
+          navigate("/");
         });
     };
 

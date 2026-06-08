@@ -7,16 +7,19 @@ export const SocketContext = createContext();
 function SocketProvider({ children }) {
   const [socket, setSocket] = useState(null);
 
-  useEffect(() => {
+  /**
+   * Create and set up a new socket connection using the current token.
+   * Returns the new socket or null if no token is available.
+   */
+  const initSocket = useCallback(() => {
     const token =
       localStorage.getItem("token") || localStorage.getItem("captain-token");
-    if (!token) return;
-    // Initialize socket connection
+    if (!token) return null;
+
     const newSocket = io(`${import.meta.env.VITE_BASE_URL}`, {
-      auth: {
-        token,
-      },
+      auth: { token },
     });
+
     newSocket.on("connect_error", (err) => {
       console.error("Socket connection failed:", err.message);
     });
@@ -28,6 +31,7 @@ function SocketProvider({ children }) {
     newSocket.on("disconnect", () => {
       console.log("Disconnected from server");
     });
+
     newSocket.io.on("reconnect", (attempt) => {
       console.log("Reconnected", attempt);
     });
@@ -36,16 +40,42 @@ function SocketProvider({ children }) {
       console.log("Trying reconnect...");
     });
 
-    setSocket(newSocket);
+    return newSocket;
+  }, []);
+
+  // Initialize socket on mount (if token exists)
+  useEffect(() => {
+    const newSocket = initSocket();
+    if (newSocket) {
+      setSocket(newSocket);
+    }
     // Cleanup on unmount
     return () => {
-      newSocket.disconnect();
+      if (newSocket) {
+        newSocket.disconnect();
+      }
     };
   }, []);
 
   useEffect(() => {
     console.log("UPDATED SOCKET:", socket);
   }, [socket]);
+
+  /**
+   * Reconnect the socket after authentication.
+   * Disconnects the old socket (if any) and creates a new connection
+   * using the current token from localStorage.
+   */
+  const reconnectSocket = useCallback(() => {
+    // Disconnect existing socket
+    if (socket) {
+      socket.disconnect();
+    }
+    const newSocket = initSocket();
+    if (newSocket) {
+      setSocket(newSocket);
+    }
+  }, [socket, initSocket]);
 
   // Function to send a message to a specific event
   const sendMessage = (eventName, message) => {
@@ -75,7 +105,7 @@ function SocketProvider({ children }) {
   );
 
   return (
-    <SocketContext.Provider value={{ socket, sendMessage, receiveMessage }}>
+    <SocketContext.Provider value={{ socket, sendMessage, receiveMessage, reconnectSocket }}>
       {children}
     </SocketContext.Provider>
   );

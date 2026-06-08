@@ -11,13 +11,13 @@ function UserLogout() {
         const response = await axiosInstance.get(`/auth/users/logOut`);
         if (response.status === 200) {
           localStorage.removeItem('token');
-          navigate('/login');
+          navigate('/');
         }
       } catch (error) {
         console.error('Logout error:', error);
         // Even if the server call fails, clear local storage and redirect
         localStorage.removeItem('token');
-        navigate('/login');
+        navigate('/');
       }
     };
 

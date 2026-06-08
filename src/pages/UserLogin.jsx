@@ -27,7 +27,7 @@ function UserLogin() {
         const data = response.data;
         setUser(data.user);
             localStorage.setItem("token",data.token);
-        navigate('/home');
+        navigate('/');
        }
      } catch (error) {
        console.error("Login Error", error);

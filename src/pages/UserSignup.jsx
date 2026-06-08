@@ -76,7 +76,7 @@ function UserSignup() {
         setUser(data.user);
         localStorage.setItem("token", data.token);
         alert("Email verified successfully");
-        navigate("/home");
+        navigate("/");
       }
     } catch (error) {
        console.error("Verification Error", error);

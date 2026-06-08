@@ -68,12 +68,26 @@ function FinishRide(props) {
               </div>
             </div>
 
-            <div className="flex items-center gap-4 p-4 bg-green-50/50 rounded-2xl border border-green-100 mt-2">
-              <div className="bg-green-500 text-white w-12 h-12 rounded-full flex items-center justify-center shadow-md">
-                <i className="text-2xl ri-bank-card-fill"></i>
+            <div className={`flex items-center gap-4 p-4 rounded-2xl border mt-2 ${
+              props.rideData?.payment?.status === 'paid'
+                ? 'bg-green-50/50 border-green-100'
+                : 'bg-amber-50/50 border-amber-100'
+            }`}>
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-md ${
+                props.rideData?.payment?.status === 'paid'
+                  ? 'bg-green-500 text-white'
+                  : 'bg-amber-500 text-white'
+              }`}>
+                <i className={`text-2xl ${
+                  props.rideData?.payment?.status === 'paid'
+                    ? 'ri-checkbox-circle-fill'
+                    : 'ri-time-fill'
+                }`}></i>
               </div>
               <div>
-                <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-0.5">Collect Cash</h3>
+                <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                  {props.rideData?.payment?.status === 'paid' ? 'Payment Received' : 'Awaiting Payment'}
+                </h3>
                 <h3 className="text-3xl font-black text-gray-900">₹{props.rideData?.fare}</h3>
               </div>
             </div>

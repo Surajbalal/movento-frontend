@@ -40,7 +40,7 @@ captainAxiosInstance.interceptors.response.use(
       } catch (_err) {
         // Refresh failed — clear token and redirect to captain login
         localStorage.removeItem("captain-token");
-        window.location.href = "/captain-login";
+        window.location.href = "/drive";
       }
     }
 
