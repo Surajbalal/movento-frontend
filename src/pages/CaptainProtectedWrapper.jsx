@@ -4,11 +4,14 @@ import { useNavigate } from 'react-router-dom';
 import captainAxiosInstance from '../api/captainAxiosInstance';
 import { useState } from 'react';
 import { useEffect } from 'react';
+import { useContext } from 'react';
+import { SocketContext } from '../Context/SocketContext';
 
 function CaptainProtectedWrapper({children}) {
     const navigate = useNavigate();
     const [isloading, setIsloading] = useState(true);
     const {captain, setCaptain} = React.useContext(CaptainDataContext);
+    const { reconnectSocket } = useContext(SocketContext);
     const token = localStorage.getItem("captain-token");
     useEffect(() => {
     if (!token) {
@@ -33,12 +36,13 @@ function CaptainProtectedWrapper({children}) {
           // 401 Unauthorized or other actual errors
           console.log(err);
           localStorage.removeItem("captain-token");
+          reconnectSocket();
           navigate("/drive");
         });
     };
 
     fetchProfile();
-  }, [token, navigate, setCaptain]);
+  }, [token, navigate, setCaptain, reconnectSocket]);
 
     
    if(isloading == true){

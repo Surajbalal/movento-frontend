@@ -97,7 +97,7 @@ function Home() {
 
   const [isVehicalPanelOpen, setIsVehicalPanelOpen] = useState(false);
 
-  // Fetch active ride only if authenticated — Redirect to Riding if accepted or ongoing
+  // Fetch active ride only if authenticated — Set active ride instead of redirect
   useEffect(() => {
     if (!token) return; // Skip for unauthenticated users
 
@@ -107,7 +107,7 @@ function Home() {
         if (!response.data?._id) return;
 
         if (response.data.status === "accepted" || response.data.status === "ongoing") {
-          navigate("/riding", { state: { ride: response.data } });
+          setActiveOngoingRide(response.data);
           return;
         }
         if (response.data.status === "pending") {
@@ -184,6 +184,7 @@ function Home() {
     const handleRideCancelled = (data) => {
       console.log("ride-cancelled received", data);
       setRideData({});
+      setActiveOngoingRide(null); // Clear banner on cancel
       setIsVehicleSearchOpen(false);
       setIsVehicalPanelOpen(false);
       setIsPanelOpen(false);
@@ -193,6 +194,7 @@ function Home() {
     socket.on("ride-ended", (data) => {
       console.log(" ride-ended received", data);
       setRideData({});
+      setActiveOngoingRide(null); // Clear banner on end
       setIsVehicleSearchOpen(false);
       setIsVehicalPanelOpen(false);
       setIsPanelOpen(false);
@@ -207,6 +209,7 @@ function Home() {
       socket.off("ride-cancelled", handleRideCancelled);
     };
   }, [socket, navigate, token]);
+
 
   const getfare = async () => {
     console.log(

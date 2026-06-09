@@ -40,7 +40,7 @@ function  ConfirmRidePopUp(props) {
   
   const handleClose = () => {
     props.setIsConfirmPopUpOpen(false);
-    // Don't reset ride accepted state - keep the floating button visible
+    // Keep map active so captain can view route to pickup location while OTP popup is minimized
   }
 
   const cancelRideHandler = async () => {

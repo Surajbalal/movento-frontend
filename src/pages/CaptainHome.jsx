@@ -16,9 +16,11 @@ function CaptainHome() {
   const [isRidePopupOpen, setIsRidePopupOpen] = useState(false);
   const [isConfirmPopUpOpen, setIsConfirmPopUpOpen] = useState(false);
   const [isRideAccepted, setIsRideAccepted] = useState(false);
+  const [liveDistance, setLiveDistance] = useState(null);
+  const [liveDuration, setLiveDuration] = useState(null);
   const confirmPopupPanelRef = useRef(null);
   const ridePopupPanelRef = useRef(null);
-  const { sendMessage, socket } = useContext(SocketContext);
+  const { sendMessage, socket, reconnectSocket } = useContext(SocketContext);
   const { captain, setCaptain } = useContext(CaptainDataContext);
   const [captainStats, setCaptainStats] = useState({});
   const [isCaptainDetailLoading, setIsCaptainDetailLoading] = useState(false);
@@ -75,23 +77,19 @@ function CaptainHome() {
 
   const navigate = useNavigate();
 
-  // Fetch active ride — NO forced redirect for ongoing rides
+  // Fetch active ride — NO forced redirect for ongoing or accepted rides
   useEffect(() => {
     const fetchRide = async () => {
       try {
         const response = await captainAxiosInstance.get("/rides/get-ride");
         if (!response.data?._id) return;
 
-        if (response.data.status === "ongoing") {
-          // Store ongoing ride — captain can manually resume
+        if (response.data.status === "ongoing" || response.data.status === "accepted") {
+          // Store active ride — captain can manually resume
           setActiveOngoingRide(response.data);
           setRide(response.data);
           return;
         }
-
-        setRide(response.data);
-        setIsConfirmPopUpOpen(true);
-        setIsRideAccepted(true);
       } catch (error) {
         console.log("No active ride found");
       }
@@ -157,26 +155,39 @@ function CaptainHome() {
     const handleRideCancelled = (data) => {
       console.log("ride-cancelled received", data);
       setRide(null);
+      setActiveOngoingRide(null); // Clear banner
       setIsRidePopupOpen(false);
       setIsConfirmPopUpOpen(false);
       setIsRideAccepted(false);
       alert(`Ride cancelled: ${data.reason || "No reason provided"}`);
     };
-    socket.on("ride-ended", (data) => {
+    const handleRideStarted = (data) => {
+      console.log("ride-started received", data);
+      setIsConfirmPopUpOpen(false);
+      setIsRidePopupOpen(false);
+      setIsRideAccepted(false);
+      navigate("/captain-riding", { state: { ride: data } });
+    };
+    const handleRideEnded = (data) => {
       console.log("ride-ended received", data);
-      setRide({});
+      setRide(null);
+      setActiveOngoingRide(null); // Clear banner
       alert(data.message);
-    });
+    };
     socket.on("new-ride", handleNewRide);
     socket.on("ride-cancelled", handleRideCancelled);
+    socket.on("ride-started", handleRideStarted);
+    socket.on("ride-ended", handleRideEnded);
     return () => {
       socket.off("new-ride", handleNewRide);
       socket.off("ride-cancelled", handleRideCancelled);
+      socket.off("ride-started", handleRideStarted);
+      socket.off("ride-ended", handleRideEnded);
     };
-  }, [socket]);
+  }, [socket, navigate]);
 
   const captainFirstName = captain?.fullName?.firstName || "Captain";
-  const showMap = isRideAccepted || (ride && ["accepted", "ongoing"].includes(ride.status));
+  const showMap = isRideAccepted;
 
   return (
     <div className={`h-screen flex flex-col relative font-sans ${showMap ? 'bg-gray-950 overflow-hidden' : 'bg-gray-50 overflow-y-auto'}`}>
@@ -352,7 +363,16 @@ function CaptainHome() {
         <div className="flex-1 flex flex-col relative w-full h-full">
           {/* ═══ FULL-SCREEN MAP ═══ */}
           <div className="absolute inset-0 z-0">
-            <LiveTracking rideData={ride} isCaptain={true} />
+            <LiveTracking 
+              rideData={ride} 
+              isCaptain={true} 
+              onRouteUpdate={(data) => {
+                if (data) {
+                  setLiveDistance(data.distanceMeters);
+                  setLiveDuration(data.duration);
+                }
+              }}
+            />
           </div>
 
           {/* ═══ TOP HEADER BAR ═══ */}
@@ -420,8 +440,14 @@ function CaptainHome() {
                   </span>
                   <span className="text-xs font-bold text-gray-800 uppercase tracking-wide">
                     {ride.status === "accepted"
-                      ? "En Route to Pickup"
-                      : ride.status === "started"
+                      ? `En Route to Pickup ${
+                          liveDistance && liveDuration
+                            ? `(${ (liveDistance / 1000).toFixed(1) } km • ${ Math.round(
+                                parseInt(liveDuration) / 60
+                              ) } min)`
+                            : ""
+                        }`
+                      : ride.status === "started" || ride.status === "ongoing"
                       ? "Driving to Destination"
                       : "Waiting for Ride"}
                   </span>
@@ -431,32 +457,34 @@ function CaptainHome() {
           </div>
 
           {/* ═══ CAPTAIN DETAILS — BOTTOM SHEET ═══ */}
-          <div
-            className={`absolute left-0 right-0 z-20 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${
-              isDetailsExpanded ? "bottom-0 top-[25vh]" : "bottom-0"
-            }`}
-          >
+          {!isRideAccepted && (
             <div
-              className={`bg-white rounded-t-[1.75rem] shadow-[0_-8px_40px_rgba(0,0,0,0.15)] flex flex-col ${
-                isDetailsExpanded ? "h-full" : "max-h-[45vh]"
-              } overflow-hidden`}
+              className={`absolute left-0 right-0 z-20 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+                isDetailsExpanded ? "bottom-0 top-[25vh]" : "bottom-0"
+              }`}
             >
-              {/* Drag handle */}
               <div
-                className="flex justify-center pt-3 pb-1 cursor-pointer shrink-0"
-                onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}
+                className={`bg-white rounded-t-[1.75rem] shadow-[0_-8px_40px_rgba(0,0,0,0.15)] flex flex-col ${
+                  isDetailsExpanded ? "h-full" : "max-h-[45vh]"
+                } overflow-hidden`}
               >
-                <div className="w-10 h-1 bg-gray-300 rounded-full"></div>
-              </div>
+                {/* Drag handle */}
+                <div
+                  className="flex justify-center pt-3 pb-1 cursor-pointer shrink-0"
+                  onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}
+                >
+                  <div className="w-10 h-1 bg-gray-300 rounded-full"></div>
+                </div>
 
-              <div className="flex-1 overflow-y-auto overscroll-contain">
-                <CaptainDetails
-                  stats={captainStats}
-                  isCaptainDetailLoading={isCaptainDetailLoading}
-                />
+                <div className="flex-1 overflow-y-auto overscroll-contain">
+                  <CaptainDetails
+                    stats={captainStats}
+                    isCaptainDetailLoading={isCaptainDetailLoading}
+                  />
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* ═══ CONFIRM RIDE POPUP ═══ */}
           <div
@@ -474,20 +502,7 @@ function CaptainHome() {
             />
           </div>
 
-          {/* ═══ FLOATING BUTTON — Accepted ride (show OTP) ═══ */}
-          {isRideAccepted && !isConfirmPopUpOpen && (
-            <button
-              onClick={() => setIsConfirmPopUpOpen(true)}
-              className="fixed bottom-28 md:bottom-8 right-6 md:right-8 z-50 bg-black hover:bg-gray-800 text-white p-5 rounded-full shadow-2xl transition-all duration-300 hover:scale-110 active:scale-95"
-              title="Show OTP"
-            >
-              <i className="ri-key-2-fill text-2xl"></i>
-              <span className="absolute -top-1 -right-1 flex h-4 w-4">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-4 w-4 bg-blue-500"></span>
-              </span>
-            </button>
-          )}
+
         </div>
       )}
 
@@ -575,44 +590,69 @@ function CaptainHome() {
               <nav className="flex flex-col gap-1.5">
                 <Link
                   to="/captain-home"
-                  onClick={() => setIsCaptainMenuOpen(false)}
+                  onClick={() => {
+                    setIsCaptainMenuOpen(false);
+                    setIsRideAccepted(false);
+                    setIsConfirmPopUpOpen(false);
+                    setActiveOngoingRide(null);
+                    setRide(null);
+                  }}
                   className="flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-50 hover:bg-gray-100 font-semibold text-gray-800 text-sm transition-all"
                 >
                   <i className="ri-dashboard-line text-lg text-gray-500"></i>
                   Dashboard
                 </Link>
 
-                {activeOngoingRide && (
-                  <Link
-                    to="/captain-riding"
-                    onClick={() => setIsCaptainMenuOpen(false)}
-                    className="flex items-center justify-between px-4 py-3 rounded-xl bg-green-50 text-green-700 hover:bg-green-100 font-bold text-sm transition-all animate-pulse"
+                {(isRideAccepted || isConfirmPopUpOpen || activeOngoingRide) && (
+                  <div
+                    className="flex items-center justify-between px-4 py-3 rounded-xl bg-green-100 text-green-800 font-bold text-sm cursor-not-allowed border border-green-200"
+                    title="You are currently in an active ride flow"
                   >
                     <span className="flex items-center gap-3">
-                      <i className="ri-navigation-line text-lg"></i>
-                      Active Ride
+                      <i className="ri-navigation-line text-lg text-green-600"></i>
+                      Active Ride (Current)
                     </span>
-                    <span className="w-2.5 h-2.5 bg-green-500 rounded-full"></span>
+                    <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping"></span>
+                  </div>
+                )}
+
+                {isConfirmPopUpOpen ? (
+                  <div
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-gray-300 text-sm cursor-not-allowed"
+                    title="Please complete or minimize the active ride flow to view history"
+                  >
+                    <i className="ri-history-line text-lg text-gray-300"></i>
+                    Ride History
+                  </div>
+                ) : (
+                  <Link
+                    to="/captain-history"
+                    onClick={() => setIsCaptainMenuOpen(false)}
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 font-semibold text-gray-700 hover:text-gray-900 text-sm transition-all"
+                  >
+                    <i className="ri-history-line text-lg text-gray-500"></i>
+                    Ride History
                   </Link>
                 )}
 
-                <Link
-                  to="/captain-history"
-                  onClick={() => setIsCaptainMenuOpen(false)}
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 font-semibold text-gray-700 hover:text-gray-900 text-sm transition-all"
-                >
-                  <i className="ri-history-line text-lg text-gray-500"></i>
-                  Ride History
-                </Link>
-
-                <Link
-                  to="/captain-settings"
-                  onClick={() => setIsCaptainMenuOpen(false)}
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 font-semibold text-gray-700 hover:text-gray-900 text-sm transition-all"
-                >
-                  <i className="ri-settings-3-line text-lg text-gray-500"></i>
-                  Settings
-                </Link>
+                {isConfirmPopUpOpen ? (
+                  <div
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-gray-300 text-sm cursor-not-allowed"
+                    title="Please complete or minimize the active ride flow to view settings"
+                  >
+                    <i className="ri-settings-3-line text-lg text-gray-300"></i>
+                    Settings
+                  </div>
+                ) : (
+                  <Link
+                    to="/captain-settings"
+                    onClick={() => setIsCaptainMenuOpen(false)}
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 font-semibold text-gray-700 hover:text-gray-900 text-sm transition-all"
+                  >
+                    <i className="ri-settings-3-line text-lg text-gray-500"></i>
+                    Settings
+                  </Link>
+                )}
               </nav>
             </div>
 
@@ -627,6 +667,7 @@ function CaptainHome() {
                     console.error("Captain logout backend call failed:", err);
                   }
                   localStorage.removeItem("captain-token");
+                  reconnectSocket();
                   navigate("/drive");
                 }}
                 className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 font-bold text-sm transition-all w-full text-left cursor-pointer"
@@ -639,15 +680,21 @@ function CaptainHome() {
         </div>
       )}
 
-      {/* RESUME RIDE BANNER — Ongoing rides (shown only if not accepted) */}
-      {activeOngoingRide && !isRideAccepted && (
+      {/* RESUME RIDE BANNER — Ongoing rides (shown only if confirm popup not open) */}
+      {activeOngoingRide && !isConfirmPopUpOpen && (
         <div className="fixed bottom-0 left-0 right-0 z-50 p-4 md:p-0 md:bottom-6 md:left-1/2 md:-translate-x-1/2 md:w-auto pointer-events-auto">
           <button
-            onClick={() =>
-              navigate("/captain-riding", {
-                state: { ride: activeOngoingRide },
-              })
-            }
+            onClick={() => {
+              if (activeOngoingRide.status === "accepted") {
+                setRide(activeOngoingRide);
+                setIsConfirmPopUpOpen(true);
+                setIsRideAccepted(true);
+              } else {
+                navigate("/captain-riding", {
+                  state: { ride: activeOngoingRide },
+                });
+              }
+            }}
             className="w-full md:w-auto flex items-center justify-between gap-4 bg-gray-900 text-white px-6 py-4 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.5)] hover:bg-gray-800 transition-all duration-300 group"
           >
             <div className="flex items-center gap-3">
@@ -675,14 +722,14 @@ function CaptainHome() {
       )}
 
       {/* Call component */}
-      {ride?._id && captain?._id && (
+      {/* {ride?._id && captain?._id && (
         <Call
           ref={callRef}
           rideId={ride._id}
           callerId={captain._id}
           receiverId={ride?.user?._id}
         />
-      )}
+      )} */}
 
       <style>{`
         @keyframes fadeSlideDown {

@@ -33,11 +33,42 @@ function CaptainRiding() {
   const location = useLocation();
   const initialRideData = location.state?.ride;
   const [rideData, setRideData] = useState(initialRideData);
-  const { socket, receiveMessage } = useContext(SocketContext);
+  const { socket, receiveMessage, reconnectSocket } = useContext(SocketContext);
   const { captain } = useContext(CaptainDataContext);
   const [isCaptainMenuOpen, setIsCaptainMenuOpen] = useState(false);
   const navigate = useNavigate();
   const status = rideData?.status;
+
+  // ─── Fetch Active Ride Fallback & Security Check ───────
+  useEffect(() => {
+    const fetchRide = async () => {
+      try {
+        const response = await captainAxiosInstance.get("/rides/get-ride");
+        if (response.data?._id) {
+          if (response.data.status !== "ongoing") {
+            console.log("Access denied: ride is not ongoing");
+            navigate("/captain-home");
+          } else {
+            setRideData(response.data);
+          }
+        } else {
+          console.log("No active ride found on refresh, redirecting to Captain Home");
+          navigate("/captain-home");
+        }
+      } catch (error) {
+        console.error("Error fetching active ride on refresh:", error);
+        navigate("/captain-home");
+      }
+    };
+
+    if (!rideData) {
+      fetchRide();
+    } else if (rideData.status !== "ongoing") {
+      console.log("Access denied: ride status is not ongoing");
+      navigate("/captain-home");
+    }
+  }, [rideData, navigate]);
+
 
   useRideRoom(socket, rideData?._id);
 
@@ -242,7 +273,7 @@ function CaptainRiding() {
             </div>
 
             {/* ── End Ride Button ─────────────── */}
-            {(status === "accepted" || status === "ongoing") && (
+            {status === "ongoing" && (
               <div className="pt-4">
                 <button
                   onClick={() => setIsFinishRidePanelOpen(true)}
@@ -371,23 +402,32 @@ function CaptainRiding() {
                   Dashboard
                 </Link>
 
-                <Link
-                  to="/captain-history"
-                  onClick={() => setIsCaptainMenuOpen(false)}
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 font-semibold text-gray-700 hover:text-gray-900 text-sm transition-all"
+                <div
+                  className="flex items-center justify-between px-4 py-3 rounded-xl bg-green-100 text-green-800 font-bold text-sm cursor-not-allowed border border-green-200"
+                  title="You are currently in an active ride"
                 >
-                  <i className="ri-history-line text-lg text-gray-500"></i>
-                  Ride History
-                </Link>
+                  <span className="flex items-center gap-3">
+                    <i className="ri-navigation-line text-lg text-green-600"></i>
+                    Active Ride (Current)
+                  </span>
+                  <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping"></span>
+                </div>
 
-                <Link
-                  to="/captain-settings"
-                  onClick={() => setIsCaptainMenuOpen(false)}
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 font-semibold text-gray-700 hover:text-gray-900 text-sm transition-all"
+                <div
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-gray-300 text-sm cursor-not-allowed"
+                  title="Please complete the active ride to view history"
                 >
-                  <i className="ri-settings-3-line text-lg text-gray-500"></i>
+                  <i className="ri-history-line text-lg text-gray-300"></i>
+                  Ride History
+                </div>
+
+                <div
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-gray-300 text-sm cursor-not-allowed"
+                  title="Please complete the active ride to view settings"
+                >
+                  <i className="ri-settings-3-line text-lg text-gray-300"></i>
                   Settings
-                </Link>
+                </div>
               </nav>
             </div>
 
@@ -402,6 +442,7 @@ function CaptainRiding() {
                     console.error("Captain logout backend call failed:", err);
                   }
                   localStorage.removeItem("captain-token");
+                  reconnectSocket();
                   navigate("/drive");
                 }}
                 className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 font-bold text-sm transition-all w-full text-left cursor-pointer"

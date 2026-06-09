@@ -92,6 +92,29 @@ function Riding() {
   const [showNavMenu, setShowNavMenu] = useState(false);
   const { user } = useContext(UserDataContext);
 
+  // ─── Fetch Active Ride Fallback (On Refresh) ───────────
+  useEffect(() => {
+    if (rideData?._id) return;
+
+    const fetchRide = async () => {
+      try {
+        const response = await axiosInstance.get("/rides/get-ride");
+        if (response.data?._id) {
+          setRideData(response.data);
+        } else {
+          console.log("No active ride found on refresh, redirecting to Home");
+          navigate("/");
+        }
+      } catch (error) {
+        console.error("Error fetching active ride on refresh:", error);
+        navigate("/");
+      }
+    };
+
+    fetchRide();
+  }, [rideData, navigate]);
+
+
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelStep, setCancelStep] = useState(1);
   const [cancelReason, setCancelReason] = useState("");

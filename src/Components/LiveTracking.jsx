@@ -2,22 +2,59 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import {
   GoogleMap,
   Marker,
-  DirectionsRenderer,
   Polyline,
   useJsApiLoader,
 } from "@react-google-maps/api";
+import axiosInstance from "../api/axiosInstance";
+import captainAxiosInstance from "../api/captainAxiosInstance";
 
 const containerStyle = {
   width: "100%",
   height: "100%",
 };
 
-export default function LiveTracking({ rideData, isCaptain, pickup: pickupProp, destination: destinationProp }) {
+function decodePolyline(encoded) {
+  if (!encoded) return [];
+  const poly = [];
+  let index = 0;
+  const len = encoded.length;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < len) {
+    let b;
+    let shift = 0;
+    let result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+    lat += dlat;
+
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+    lng += dlng;
+
+    poly.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+  return poly;
+}
+
+export default function LiveTracking({ rideData, isCaptain, pickup: pickupProp, destination: destinationProp, onRouteUpdate }) {
   const mapRef = useRef(null);
 
   const [userLocation, setUserLocation] = useState(null);
   const [captainLocation, setCaptainLocation] = useState(null);
-  const [directions, setDirections] = useState(null);
+  const [routeCoordinates, setRouteCoordinates] = useState([]);
+  const [routeError, setRouteError] = useState(null);
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API,
@@ -52,34 +89,22 @@ export default function LiveTracking({ rideData, isCaptain, pickup: pickupProp, 
     if (typeof pickup === "object" && pickup.lat && pickup.lng) {
       return pickup;
     }
-    if (directions) {
-      const leg = directions.routes[0]?.legs[0];
-      if (leg?.start_location) {
-        return {
-          lat: leg.start_location.lat(),
-          lng: leg.start_location.lng(),
-        };
-      }
+    if (routeCoordinates && routeCoordinates.length > 0) {
+      return routeCoordinates[0];
     }
     return null;
-  }, [pickup, directions]);
+  }, [pickup, routeCoordinates]);
 
   const resolvedDestination = useMemo(() => {
     if (!destination) return null;
     if (typeof destination === "object" && destination.lat && destination.lng) {
       return destination;
     }
-    if (directions) {
-      const leg = directions.routes[0]?.legs[0];
-      if (leg?.end_location) {
-        return {
-          lat: leg.end_location.lat(),
-          lng: leg.end_location.lng(),
-        };
-      }
+    if (routeCoordinates && routeCoordinates.length > 0) {
+      return routeCoordinates[routeCoordinates.length - 1];
     }
     return null;
-  }, [destination, directions]);
+  }, [destination, routeCoordinates]);
 
   // ===============================
   // 👤 Get User Location
@@ -160,10 +185,10 @@ export default function LiveTracking({ rideData, isCaptain, pickup: pickupProp, 
       };
     }
 
-    // ONGOING → Captain to Destination
-    if (status === "ongoing" && captainLocation && destination) {
+    // ONGOING → Pickup to Destination
+    if (status === "ongoing" && pickup && destination) {
       return {
-        origin: captainLocation,
+        origin: pickup,
         destination: destination,
         showRoute: true,
       };
@@ -209,57 +234,93 @@ export default function LiveTracking({ rideData, isCaptain, pickup: pickupProp, 
     if (!routeInfo.showRoute) return;
     if (!routeInfo.origin || !routeInfo.destination) return;
 
-    console.log("[LiveTracking] Fetching directions:", {
-      origin: routeInfo.origin,
-      destination: routeInfo.destination,
-    });
+    const fetchRoute = async () => {
+      try {
+        setRouteError(null);
+        let originParam = "";
+        if (typeof routeInfo.origin === "string") {
+          originParam = routeInfo.origin;
+        } else if (routeInfo.origin && typeof routeInfo.origin === "object") {
+          originParam = `${routeInfo.origin.lat},${routeInfo.origin.lng}`;
+        }
 
-    const service = new window.google.maps.DirectionsService();
+        let destParam = "";
+        if (typeof routeInfo.destination === "string") {
+          destParam = routeInfo.destination;
+        } else if (routeInfo.destination && typeof routeInfo.destination === "object") {
+          destParam = `${routeInfo.destination.lat},${routeInfo.destination.lng}`;
+        }
 
-    service.route(
-      {
-        origin: routeInfo.origin,
-        destination: routeInfo.destination,
-        travelMode: window.google.maps.TravelMode.DRIVING,
-      },
-      (result, status) => {
-        if (status === "OK") {
-          console.log("[LiveTracking] Directions OK — rendering route");
-          setDirections(result);
+        const client = isCaptain ? captainAxiosInstance : axiosInstance;
+        const requestUrl = "/rides/maps/get-route-polyline";
+        const requestParams = {
+          origin: originParam,
+          destination: destParam
+        };
+        console.log("[LiveTracking] Request URL:", requestUrl);
+        console.log("[LiveTracking] Request parameters:", requestParams);
 
-          if (mapRef.current) {
-            const bounds = new window.google.maps.LatLngBounds();
-            result.routes[0].overview_path.forEach((point) =>
-              bounds.extend(point)
-            );
-            mapRef.current.fitBounds(bounds, {
-              top: 60,
-              bottom: 200,
-              left: 40,
-              right: 40,
-            });
+        const response = await client.get(requestUrl, {
+          params: requestParams
+        });
+
+        console.log("[LiveTracking] Response payload:", response.data);
+
+        const encodedPolyline = response.data?.encodedPolyline;
+        if (encodedPolyline) {
+          console.log("[LiveTracking] Routes API OK — encodedPolyline length:", encodedPolyline.length);
+          try {
+            const decoded = decodePolyline(encodedPolyline);
+            console.log("[LiveTracking] Decoded coordinates count:", decoded.length);
+            setRouteCoordinates(decoded);
+
+            if (onRouteUpdate) {
+              onRouteUpdate({
+                distanceMeters: response.data.distanceMeters,
+                duration: response.data.duration
+              });
+            }
+
+            if (mapRef.current && decoded.length > 0) {
+              const bounds = new window.google.maps.LatLngBounds();
+              decoded.forEach((point) => bounds.extend(point));
+              mapRef.current.fitBounds(bounds, {
+                top: 60,
+                bottom: 200,
+                left: 40,
+                right: 40,
+              });
+            }
+          } catch (decodeErr) {
+            console.error("[LiveTracking] Failed to decode polyline:", decodeErr);
+            setRouteError("Failed to decode route coordinates");
+            setRouteCoordinates([]);
           }
         } else {
-          console.warn(
-            "[LiveTracking] Directions failed:",
-            status,
-            "- falling back to straight polyline"
-          );
-          // Clear stale directions so fallback polyline renders
-          setDirections(null);
+          const errMsg = "Response payload missing encodedPolyline";
+          console.error("[LiveTracking] Route polyline error:", errMsg);
+          setRouteError(errMsg);
+          setRouteCoordinates([]);
         }
+      } catch (error) {
+        const errMsg = error.response?.data?.message || error.message || "Failed to load route";
+        console.error("[LiveTracking] Routes proxy failed:", errMsg, error);
+        setRouteError(`Routes proxy failed: ${errMsg}`);
+        setRouteCoordinates([]);
       }
-    );
-  }, [isLoaded, routeInfo.showRoute, originKey, destinationKey]);
+    };
+
+    fetchRoute();
+  }, [isLoaded, routeInfo.showRoute, originKey, destinationKey, isCaptain]);
 
   // ===============================
-  // 📐 Fit bounds to markers (Fallback when directions is not loaded yet/fails)
+  // 📐 Fit bounds to markers (Fallback when route coordinates are not loaded yet/fails)
   // ===============================
   useEffect(() => {
     if (!isLoaded || !mapRef.current) return;
     if (!resolvedPickup || !resolvedDestination) return;
-    // Only fit bounds when we don't have directions (directions handler fits its own bounds)
-    if (directions) return;
+    // Only fit bounds when we don't have route coordinates
+    if (routeCoordinates && routeCoordinates.length > 0) return;
 
     const bounds = new window.google.maps.LatLngBounds();
     bounds.extend(resolvedPickup);
@@ -276,7 +337,7 @@ export default function LiveTracking({ rideData, isCaptain, pickup: pickupProp, 
     resolvedPickup,
     resolvedDestination,
     captainLocation,
-    directions,
+    routeCoordinates,
   ]);
 
   // ===============================
@@ -288,7 +349,29 @@ export default function LiveTracking({ rideData, isCaptain, pickup: pickupProp, 
   if (!isLoaded) return <div>Loading Map...</div>;
 
   return (
-    <div style={{ width: "100%", height: "100%" }}>
+    <div style={{ width: "100%", height: "100%", position: "relative" }}>
+      {routeError && (
+        <div style={{
+          position: "absolute",
+          top: "10px",
+          left: "50%",
+          transform: "translateX(-50%)",
+          backgroundColor: "#FEE2E2",
+          color: "#991B1B",
+          border: "1px solid #F87171",
+          padding: "8px 16px",
+          borderRadius: "6px",
+          zIndex: 9999,
+          fontWeight: "600",
+          fontSize: "13px",
+          boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
+          textAlign: "center",
+          width: "90%",
+          maxWidth: "400px"
+        }}>
+          ⚠️ {routeError}
+        </div>
+      )}
       <GoogleMap
         mapContainerStyle={containerStyle}
         center={mapCenter}
@@ -313,22 +396,14 @@ export default function LiveTracking({ rideData, isCaptain, pickup: pickupProp, 
           <Marker position={resolvedDestination} label="D" />
         )}
 
-        {/* Route Line — Directions API result */}
-        {directions && (
-          <DirectionsRenderer
-            directions={directions}
-            options={{ suppressMarkers: true }}
-          />
-        )}
-
-        {/* Fallback Polyline — when Directions API fails but we have endpoints */}
-        {!directions && routeInfo.showRoute && routeInfo.origin && routeInfo.destination && (
+        {/* Route Line — decoded coordinates from computeRoutes backend API */}
+        {routeCoordinates && routeCoordinates.length > 0 && (
           <Polyline
-            path={[routeInfo.origin, routeInfo.destination]}
+            path={routeCoordinates}
             options={{
-              strokeColor: "#4285F4",
-              strokeOpacity: 0.8,
-              strokeWeight: 4,
+              strokeColor: "#2563EB", // premium blue
+              strokeOpacity: 0.85,
+              strokeWeight: 5,
               geodesic: true,
             }}
           />

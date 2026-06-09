@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { UserDataContext } from '../Context/UserContext';
 import { useContext } from 'react';
 import axiosInstance from '../api/axiosInstance';
+import { SocketContext } from '../Context/SocketContext';
 
 function UserProtectWrapper({children}) {
     const navigate = useNavigate();
-    const {user,setUser} = useContext(  UserDataContext);
+    const {user,setUser} = useContext(UserDataContext);
+    const { reconnectSocket } = useContext(SocketContext);
     const token = localStorage.getItem('token');
    useEffect(() => {
     if (!token) {
@@ -31,12 +33,13 @@ function UserProtectWrapper({children}) {
           // 401 Unauthorized or other actual errors
           console.log(err);
           localStorage.removeItem("token");
+          reconnectSocket();
           navigate("/");
         });
     };
 
     fetchProfile();
-  }, [token, navigate, setUser]);
+  }, [token, navigate, setUser, reconnectSocket]);
   return (
     <div>{children}</div>
   )
