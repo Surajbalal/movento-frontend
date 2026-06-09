@@ -722,14 +722,14 @@ function CaptainHome() {
       )}
 
       {/* Call component */}
-      {/* {ride?._id && captain?._id && (
+       {ride?._id && captain?._id && (
         <Call
           ref={callRef}
           rideId={ride._id}
           callerId={captain._id}
           receiverId={ride?.user?._id}
         />
-      )} */}
+      )} 
 
       <style>{`
         @keyframes fadeSlideDown {
