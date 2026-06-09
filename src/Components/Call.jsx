@@ -2,9 +2,14 @@ import React, { useContext, useEffect, useState, useRef, forwardRef, useImperati
 import { SocketContext } from '../Context/SocketContext';
 import { joinCall, leaveCall } from '../services/agora.service';
 
-const Call = forwardRef(({ rideId, callerId, receiverId, renderTrigger }, ref) => {
+const Call = forwardRef(({ rideId, callerId, receiverId, renderTrigger, hideTrigger }, ref) => {
   const { sendMessage, receiveMessage,socket } = useContext(SocketContext);
   const [callState, setCallState] = useState('idle'); // 'idle' | 'calling' | 'incoming' | 'connected'
+  const [callerNameState, setCallerNameState] = useState("");
+
+  const myUserId = typeof callerId === 'object' && callerId?._id ? callerId._id : callerId;
+  const targetUserId = typeof receiverId === 'object' && receiverId?._id ? receiverId._id : receiverId;
+
   // Using a universally supported mp3 ringtone URL
   const audioRef = useRef(new Audio("https://actions.google.com/sounds/v1/alarms/phone_ringing.ogg"));
 
@@ -35,15 +40,25 @@ const Call = forwardRef(({ rideId, callerId, receiverId, renderTrigger }, ref) =
   useEffect(() => {
     if (!receiveMessage) return;
     const unsubs = [];
-    // socket.on("incoming-call", (data) => {
-    //   console.log("incoming-call", data);
-    // })
 
     // When someone calls me
     unsubs.push(
       receiveMessage("incoming-call", (data) => {
-        console.log("incoming-call", data);
-        if (data.rideId === rideId && data.receiverId === callerId) {
+        console.log("[Call] incoming-call event received:", data);
+        const dataReceiverId = typeof data.receiverId === 'object' && data.receiverId?._id ? data.receiverId._id : data.receiverId;
+        const dataCallerId = typeof data.callerId === 'object' && data.callerId?._id ? data.callerId._id : data.callerId;
+        
+        console.log("[Call] incoming-call comparison check:", {
+          dataRideId: data.rideId,
+          targetRideId: rideId,
+          dataReceiverId,
+          myUserId,
+          matches: data.rideId === rideId && dataReceiverId === myUserId
+        });
+
+        if (data.rideId === rideId && dataReceiverId === myUserId) {
+          console.log("[Call] Ringing user:", myUserId, "caller:", dataCallerId);
+          setCallerNameState(data.callerName || "Unknown Caller");
           setCallState('incoming');
           audioRef.current.play().catch(e => console.log("Audio blocked by browser:", e));
         }
@@ -53,10 +68,24 @@ const Call = forwardRef(({ rideId, callerId, receiverId, renderTrigger }, ref) =
     // When someone accepts my call
     unsubs.push(
       receiveMessage("call-accepted", (data) => {
-        if (data.rideId === rideId && (data.callerId === callerId || data.receiverId === callerId)) {
+        console.log("[Call] call-accepted event received:", data);
+        const dataReceiverId = typeof data.receiverId === 'object' && data.receiverId?._id ? data.receiverId._id : data.receiverId;
+        const dataCallerId = typeof data.callerId === 'object' && data.callerId?._id ? data.callerId._id : data.callerId;
+
+        console.log("[Call] call-accepted comparison check:", {
+          dataRideId: data.rideId,
+          targetRideId: rideId,
+          dataCallerId,
+          dataReceiverId,
+          myUserId,
+          matches: data.rideId === rideId && (dataCallerId === myUserId || dataReceiverId === myUserId)
+        });
+
+        if (data.rideId === rideId && (dataCallerId === myUserId || dataReceiverId === myUserId)) {
+          console.log("[Call] Call connected!");
           stopAudio();
           setCallState('connected');
-          joinCall(`ride_${rideId}`, callerId);
+          joinCall(`ride_${rideId}`, myUserId);
         }
       })
     );
@@ -64,11 +93,21 @@ const Call = forwardRef(({ rideId, callerId, receiverId, renderTrigger }, ref) =
     // When call is rejected
     unsubs.push(
       receiveMessage("call-rejected", (data) => {
-        console.log("call-rejected", data);
-        if (data.rideId === rideId && data.callerId === receiverId) {
+        console.log("[Call] call-rejected event received:", data);
+        const dataCallerId = typeof data.callerId === 'object' && data.callerId?._id ? data.callerId._id : data.callerId;
+
+        console.log("[Call] call-rejected comparison check:", {
+          dataRideId: data.rideId,
+          targetRideId: rideId,
+          dataCallerId,
+          myUserId,
+          matches: data.rideId === rideId && dataCallerId === myUserId
+        });
+
+        if (data.rideId === rideId && dataCallerId === myUserId) {
+          console.log("[Call] Call was rejected by other participant.");
           stopAudio();
           setCallState('idle');
-          // Optional: Show toast here, alert may block UI
         }
       })
     );
@@ -76,7 +115,9 @@ const Call = forwardRef(({ rideId, callerId, receiverId, renderTrigger }, ref) =
     // When call is ended
     unsubs.push(
       receiveMessage("call-ended", (data) => {
+        console.log("[Call] call-ended event received:", data);
         if (data.rideId === rideId) {
+          console.log("[Call] Call ended successfully.");
           stopAudio();
           leaveCall();
           setCallState('idle');
@@ -90,20 +131,21 @@ const Call = forwardRef(({ rideId, callerId, receiverId, renderTrigger }, ref) =
       });
       stopAudio();
     };
-  }, [receiveMessage, rideId, callerId]);
+  }, [receiveMessage, rideId, myUserId, targetUserId]);
 
   const initiateCall = () => {
-    console.log("inside initiateCall",rideId,callerId,receiverId);
-    if (!rideId || !callerId || !receiverId) return console.warn("Missing Call Data");
+    console.log("[Call] Outgoing call request initiated: ", { rideId, myUserId, targetUserId });
+    if (!rideId || !myUserId || !targetUserId) return console.warn("[Call] Missing Call Data");
     setCallState('calling');
   
     audioRef.current.play().catch(e => console.log("Audio blocked by browser:", e));
     sendMessage("call-user",  rideId);
-     sendMessage("debug-room", rideId);
+    sendMessage("debug-room", rideId);
     // Auto hangup after 30 seconds of ringing
     setTimeout(() => {
       setCallState((current) => {
         if (current === 'calling') {
+          console.log("[Call] Ringing timeout — auto hangup after 30s");
           stopAudio();
           sendMessage("end-call", rideId);
           return 'idle';
@@ -117,19 +159,22 @@ const Call = forwardRef(({ rideId, callerId, receiverId, renderTrigger }, ref) =
   useImperativeHandle(ref, () => ({ initiateCall }));
 
   const acceptCall = () => {
+    console.log("[Call] Call accepted by current user:", myUserId);
     stopAudio();
     sendMessage("accept-call", rideId);
     setCallState('connected');
-    joinCall(`ride_${rideId}`, callerId);
+    joinCall(`ride_${rideId}`, myUserId);
   };
 
   const rejectCall = () => {
+    console.log("[Call] Call declined/rejected by current user:", myUserId);
     stopAudio();
     sendMessage("reject-call",  rideId);
     setCallState('idle');
   };
 
   const endCall = () => {
+    console.log("[Call] Call hung up/ended by current user:", myUserId);
     stopAudio();
     leaveCall();
     sendMessage("end-call", rideId);
@@ -138,6 +183,7 @@ const Call = forwardRef(({ rideId, callerId, receiverId, renderTrigger }, ref) =
 
   // UI Render
   if (callState === 'idle') {
+    if (hideTrigger) return null;
     if (renderTrigger) return renderTrigger(initiateCall);
     return (
       <button 
@@ -172,11 +218,17 @@ const Call = forwardRef(({ rideId, callerId, receiverId, renderTrigger }, ref) =
              </div>
           </div>
 
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">
+          <h2 className="text-2xl font-bold text-gray-800 mb-2 text-center">
             {callState === 'calling' ? 'Calling...' : 
              callState === 'incoming' ? 'Incoming Call' : 
              'In Call'}
           </h2>
+          
+          {callState === 'incoming' && (
+            <p className="text-lg font-semibold text-gray-700 mb-4 text-center animate-pulse">
+              {callerNameState}
+            </p>
+          )}
           
           <p className="text-gray-500 mb-8 text-center text-sm font-medium">
              {callState === 'connected' ? 'Secured with Agora.io' : 'Waiting for response...'}

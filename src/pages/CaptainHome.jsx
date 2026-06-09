@@ -728,6 +728,7 @@ function CaptainHome() {
           rideId={ride._id}
           callerId={captain._id}
           receiverId={ride?.user?._id}
+          hideTrigger={true}
         />
       )} 
 
